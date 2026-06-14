@@ -3,7 +3,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { getCurrentUser, logout } from "@/lib/auth";
+import type { AuthUser } from "@/lib/auth";
 
 const navItems = [
   { label: "Dashboard", href: "/" },
@@ -18,7 +20,10 @@ type Theme = "light" | "dark";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
   const [theme, setTheme] = useState<Theme>("dark");
+  const [user, setUser] = useState<AuthUser | null>(null);
 
   const isDark = theme === "dark";
 
@@ -35,35 +40,63 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
-    if (savedTheme === "light" || savedTheme === "dark") {
-      applyTheme(savedTheme, false);
-    } else {
-      applyTheme("dark", false);
-    }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const savedTheme = localStorage.getItem("theme");
+
+      if (savedTheme === "light" || savedTheme === "dark") {
+        setTheme(savedTheme);
+        document.documentElement.setAttribute("data-theme", savedTheme);
+      } else {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+
+      setUser(getCurrentUser());
+    }, 0);
 
     function handlePlatformThemeChange(event: Event) {
       const themeEvent = event as CustomEvent<Theme>;
 
       if (themeEvent.detail === "light" || themeEvent.detail === "dark") {
-        applyTheme(themeEvent.detail, false);
+        setTheme(themeEvent.detail);
+        document.documentElement.setAttribute("data-theme", themeEvent.detail);
       }
     }
 
+    function handleAuthChange() {
+      setUser(getCurrentUser());
+    }
+
     window.addEventListener("platform-theme-change", handlePlatformThemeChange);
+    window.addEventListener("platform-auth-change", handleAuthChange);
+    window.addEventListener("storage", handleAuthChange);
 
     return () => {
+      window.clearTimeout(timer);
+
       window.removeEventListener(
         "platform-theme-change",
         handlePlatformThemeChange
       );
+      window.removeEventListener("platform-auth-change", handleAuthChange);
+      window.removeEventListener("storage", handleAuthChange);
     };
   }, []);
 
   function toggleTheme() {
     const nextTheme: Theme = isDark ? "light" : "dark";
     applyTheme(nextTheme);
+  }
+
+  function handleLogout() {
+    logout();
+    setUser(null);
+    window.dispatchEvent(new Event("platform-auth-change"));
+    router.push("/login");
+    router.refresh();
   }
 
   const themeVars = {
@@ -99,13 +132,42 @@ export default function AppShell({ children }: { children: ReactNode }) {
               PlatformIQ
             </div>
 
-            <p
-              className="mt-1 text-sm"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
               Intelligent software delivery platform
             </p>
           </Link>
+
+          <div className="mt-6 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3 text-sm transition-colors">
+            {user ? (
+              <>
+                <p
+                  className="break-words font-semibold"
+                  style={{ color: "var(--text-main)" }}
+                >
+                  {user.email}
+                </p>
+
+                <p className="mt-1" style={{ color: "var(--text-muted)" }}>
+                  Role: {user.role}
+                </p>
+
+                <button
+                  onClick={handleLogout}
+                  className="mt-3 w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="block rounded-lg bg-blue-600 px-3 py-2 text-center font-medium transition hover:bg-blue-500"
+                style={{ color: "#ffffff" }}
+              >
+                Login
+              </Link>
+            )}
+          </div>
 
           <button
             onClick={toggleTheme}

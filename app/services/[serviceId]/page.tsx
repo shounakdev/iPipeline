@@ -2,17 +2,21 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   getLinkedRepository,
   platformApi,
   type Service,
 } from "@/lib/platformiq-api";
+import { ApiError } from "@/lib/api";
+import { canTriggerPipeline, getCurrentUser } from "@/lib/auth";
+import type { AuthUser } from "@/lib/auth";
 
 const tabs = ["Overview", "Repository", "Environments", "Pipelines", "Audit"];
 
 export default function ServiceDetailPage() {
+  const router = useRouter();
   const params = useParams<{ serviceId: string }>();
   const serviceId = params.serviceId;
 
@@ -21,7 +25,14 @@ export default function ServiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState("");
-  const [triggerResult, setTriggerResult] = useState<unknown>(null);
+  const [triggerResultJson, setTriggerResultJson] = useState("");
+
+  const [user] = useState<AuthUser | null>(() => {
+    if (typeof window === "undefined") return null;
+    return getCurrentUser();
+  });
+
+  const allowedToTrigger = canTriggerPipeline(user?.role);
 
   useEffect(() => {
     async function loadService() {
@@ -42,6 +53,11 @@ export default function ServiceDetailPage() {
   const branch = repository?.default_branch || "main";
 
   async function handleTriggerPipeline() {
+    if (!allowedToTrigger) {
+      setError("You do not have permission to trigger pipelines.");
+      return;
+    }
+
     if (!repository?.repo_url) {
       setError("No linked repository found for this service");
       return;
@@ -49,7 +65,7 @@ export default function ServiceDetailPage() {
 
     setTriggering(true);
     setError("");
-    setTriggerResult(null);
+    setTriggerResultJson("");
 
     try {
       const result = await platformApi.triggerPipeline(
@@ -57,11 +73,27 @@ export default function ServiceDetailPage() {
         branch
       );
 
-      setTriggerResult(result);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to trigger pipeline"
+      setTriggerResultJson(
+        JSON.stringify(result ?? { message: "Pipeline triggered" }, null, 2)
       );
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          setError("Please login to trigger a pipeline.");
+          router.push("/login");
+          return;
+        }
+
+        if (err.status === 403) {
+          setError("You do not have permission to trigger pipelines.");
+          return;
+        }
+
+        setError(err.message);
+        return;
+      }
+
+      setError(err instanceof Error ? err.message : "Failed to trigger pipeline");
     } finally {
       setTriggering(false);
     }
@@ -93,6 +125,7 @@ export default function ServiceDetailPage() {
         <h1 className="mt-3 text-3xl font-bold text-[var(--text-main)]">
           {service.name}
         </h1>
+
         <p className="mt-2 text-[var(--text-muted)]">
           {service.description || "No description"}
         </p>
@@ -159,6 +192,7 @@ export default function ServiceDetailPage() {
                   <div className="font-medium text-[var(--text-main)]">
                     {env.name}
                   </div>
+
                   <div className="text-sm text-[var(--text-muted)]">
                     Active: {env.is_active ? "Yes" : "No"}
                   </div>
@@ -177,9 +211,11 @@ export default function ServiceDetailPage() {
             <div className="mb-2 text-sm text-[var(--text-muted)]">
               Linked Repository
             </div>
+
             <div className="break-all text-[var(--text-main)]">
               {repository?.repo_url || "No repository linked"}
             </div>
+
             <div className="mt-2 text-sm text-[var(--text-muted)]">
               Branch: {branch}
             </div>
@@ -187,15 +223,26 @@ export default function ServiceDetailPage() {
 
           <button
             onClick={handleTriggerPipeline}
-            disabled={triggering || !repository?.repo_url}
+            disabled={triggering || !repository?.repo_url || !allowedToTrigger}
+            title={
+              !allowedToTrigger
+                ? "Viewers cannot trigger pipelines"
+                : !repository?.repo_url
+                ? "No repository linked"
+                : undefined
+            }
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {triggering ? "Triggering..." : "Trigger Pipeline"}
+            {!allowedToTrigger
+              ? "Trigger Pipeline Disabled"
+              : triggering
+              ? "Triggering..."
+              : "Trigger Pipeline"}
           </button>
 
-          {triggerResult && (
+          {triggerResultJson && (
             <pre className="mt-5 overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--page-bg)] p-4 text-sm text-green-400">
-              {JSON.stringify(triggerResult, null, 2)}
+              {triggerResultJson}
             </pre>
           )}
         </Panel>
@@ -213,6 +260,7 @@ export default function ServiceDetailPage() {
                   <div className="font-medium text-[var(--text-main)]">
                     {event.action || "Unknown action"}
                   </div>
+
                   <div className="text-sm text-[var(--text-muted)]">
                     {event.created_at || "No timestamp"}
                   </div>

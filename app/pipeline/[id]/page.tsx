@@ -1,165 +1,336 @@
 "use client";
-import Link from "next/link";
+
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
-export default function PipelineDetailsPage() {
-  const params = useParams();
-  const pipelineId = params.id as string;
+type Theme = "light" | "dark";
+
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+type PipelineLogObject = {
+  timestamp?: string;
+  created_at?: string;
+  level?: string;
+  message?: string;
+  line?: string;
+  [key: string]: JsonValue | undefined;
+};
+
+type PipelineLog = string | PipelineLogObject;
+
+type SonarIssue = {
+  key?: string;
+  rule?: string;
+  severity?: string;
+  component?: string;
+  message?: string;
+  line?: number | null;
+  type?: string;
+  [key: string]: JsonValue | undefined;
+};
+
+type Pipeline = {
+  id: string;
+  repo_url: string;
+  branch: string;
+  status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  coverage?: number | null;
+  bugs?: number | null;
+  vulnerabilities?: number | null;
+  code_smells?: number | null;
+  duplicated_lines_density?: number | null;
+  quality_gate?: string | null;
+  sonar_report_url?: string | null;
+  sonar_issues?: SonarIssue[] | null;
+  logs?: PipelineLog[] | null;
+};
+
+
+
+export default function PipelineDetailPage() {
+  const params = useParams<{ id: string }>();
+  const pipelineId = params.id;
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-  const [pipeline, setPipeline] = useState<any>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [theme, setTheme] = useState<Theme>("light");
 
   const isDark = theme === "dark";
   const styles = getStyles(isDark);
 
-  async function fetchPipeline() {
-    const res = await fetch(`${API_URL}/pipeline/${pipelineId}`, {
-      cache: "no-store",
-    });
-
-    const data = await res.json();
-    setPipeline(data);
-  }
-
-  function toggleTheme() {
-    const nextTheme = isDark ? "light" : "dark";
-
-    setTheme(nextTheme);
-    localStorage.setItem("theme", nextTheme);
-  }
-
   useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
+  const timer = window.setTimeout(() => {
+    const savedTheme = window.localStorage.getItem("theme");
 
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
     }
+  }, 0);
+
+  return () => window.clearTimeout(timer);
+}, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    function handlePlatformThemeChange(event: Event) {
+      const themeEvent = event as CustomEvent<Theme>;
+
+      if (themeEvent.detail === "light" || themeEvent.detail === "dark") {
+        setTheme(themeEvent.detail);
+      }
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== "theme") return;
+
+      if (event.newValue === "light" || event.newValue === "dark") {
+        setTheme(event.newValue);
+      }
+    }
+
+    window.addEventListener("platform-theme-change", handlePlatformThemeChange);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener(
+        "platform-theme-change",
+        handlePlatformThemeChange
+      );
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   useEffect(() => {
-    fetchPipeline();
+    let cancelled = false;
 
-    const interval = setInterval(() => {
-      fetchPipeline();
+    async function loadPipeline() {
+      try {
+        const response = await fetch(`${API_URL}/pipeline/${pipelineId}`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch pipeline ${pipelineId}`);
+        }
+
+        const data = (await response.json()) as Pipeline;
+
+        if (cancelled) return;
+
+        setPipeline(data);
+        setError("");
+      } catch (err) {
+        if (cancelled) return;
+
+        setError(
+          err instanceof Error ? err.message : "Failed to load pipeline details"
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    const initialLoad = window.setTimeout(() => {
+      void loadPipeline();
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      void loadPipeline();
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [pipelineId]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [API_URL, pipelineId]);
 
-  if (!pipeline) {
+  function getStatusColor(status?: string) {
+    if (status === "SUCCESS") return "#16a34a";
+    if (status === "FAILED") return "#dc2626";
+    if (status === "RUNNING") return "#2563eb";
+
+    return "#ca8a04";
+  }
+
+  function getGateColor(gate?: string | null) {
+    if (gate === "PASSED" || gate === "OK") return "#16a34a";
+    if (gate === "FAILED" || gate === "ERROR") return "#dc2626";
+
+    return isDark ? "#cbd5e1" : "#6b7280";
+  }
+
+  function formatValue(value: string | number | null | undefined) {
+    if (value === null || value === undefined || value === "") return "-";
+    return value;
+  }
+
+  function renderLog(log: PipelineLog, index: number) {
+    if (typeof log === "string") {
+      return (
+        <div key={index} style={styles.logLineStyle}>
+          {log}
+        </div>
+      );
+    }
+
+    const label = log.timestamp || log.created_at || `Log ${index + 1}`;
+    const message = log.message || log.line || JSON.stringify(log);
+
+    return (
+      <div key={index} style={styles.logLineStyle}>
+        <span style={styles.logMetaStyle}>{label}</span> {message}
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <main style={styles.mainStyle}>Loading pipeline...</main>;
+  }
+
+  if (error) {
     return (
       <main style={styles.mainStyle}>
-        <div style={styles.headerRowStyle}>
-          <Link href="/" style={styles.backLinkStyle}>
-            Back to dashboard
-          </Link>
+        <Link href="/pipelineiq" style={styles.linkStyle}>
+          ← Back to PipelineIQ
+        </Link>
 
-          <button onClick={toggleTheme} style={styles.themeToggleButtonStyle}>
-            {isDark ? "☀️ Light Mode" : "🌙 Dark Mode"}
-          </button>
-        </div>
-
-        <p style={styles.pageSubtitleStyle}>Loading pipeline...</p>
+        <div style={styles.errorBoxStyle}>{error}</div>
       </main>
     );
   }
 
-  const aiReport = pipeline.analysis?.report_json;
-  const priorityItems = aiReport?.priority_items || [];
+  if (!pipeline) {
+    return (
+      <main style={styles.mainStyle}>
+        <Link href="/pipelineiq" style={styles.linkStyle}>
+          ← Back to PipelineIQ
+        </Link>
+
+        <p style={styles.mutedTextStyle}>Pipeline not found.</p>
+      </main>
+    );
+  }
 
   return (
     <main style={styles.mainStyle}>
-      <div style={styles.headerRowStyle}>
-        <Link href="/" style={styles.backLinkStyle}>
-          Back to dashboard
-        </Link>
+      <Link href="/pipelineiq" style={styles.linkStyle}>
+        ← Back to PipelineIQ
+      </Link>
 
-        <button onClick={toggleTheme} style={styles.themeToggleButtonStyle}>
-          {isDark ? "☀️ Light Mode" : "🌙 Dark Mode"}
-        </button>
+      <div style={styles.headerStyle}>
+        <div>
+          <h1 style={styles.titleStyle}>Pipeline Details</h1>
+          <p style={styles.subtitleStyle}>{pipeline.id}</p>
+        </div>
+
+        <span
+          style={{
+            ...styles.statusBadgeStyle,
+            background: getStatusColor(pipeline.status),
+          }}
+        >
+          {pipeline.status}
+        </span>
       </div>
-
-      <h1 style={styles.pageTitleStyle}>Pipeline Details</h1>
-
-      <p style={styles.pageSubtitleStyle}>{pipeline.id}</p>
-
-      <section style={styles.gridStyle}>
-        <InfoCard title="Status" value={pipeline.status} styles={styles} />
-
-        <InfoCard
-          title="Quality Gate"
-          value={pipeline.quality_gate || "-"}
-          styles={styles}
-        />
-
-        <InfoCard
-          title="Coverage"
-          value={
-            pipeline.coverage !== null && pipeline.coverage !== undefined
-              ? `${pipeline.coverage}%`
-              : "-"
-          }
-          styles={styles}
-        />
-
-        <InfoCard
-          title="Duration"
-          value={
-            pipeline.duration_seconds
-              ? `${pipeline.duration_seconds.toFixed(1)}s`
-              : "-"
-          }
-          styles={styles}
-        />
-      </section>
 
       <section style={styles.cardStyle}>
         <h2 style={styles.sectionTitleStyle}>Repository</h2>
 
-        <p style={styles.paragraphStyle}>
-          <strong>Repo:</strong> {pipeline.repo_url}
-        </p>
+        <div style={styles.gridStyle}>
+          <Info label="Repo" value={pipeline.repo_url} styles={styles} />
+          <Info label="Branch" value={pipeline.branch} styles={styles} />
+          <Info
+            label="Created"
+            value={formatValue(pipeline.created_at)}
+            styles={styles}
+          />
+          <Info
+            label="Updated"
+            value={formatValue(pipeline.updated_at)}
+            styles={styles}
+          />
+        </div>
+      </section>
 
-        <p style={styles.paragraphStyle}>
-          <strong>Branch:</strong> {pipeline.branch}
-        </p>
+      <section style={styles.cardStyle}>
+        <h2 style={styles.sectionTitleStyle}>Execution</h2>
 
-        <p style={styles.paragraphStyle}>
-          <strong>Created:</strong>{" "}
-          {new Date(pipeline.created_at).toLocaleString()}
-        </p>
+        <div style={styles.gridStyle}>
+          <Info
+            label="Started"
+            value={formatValue(pipeline.started_at)}
+            styles={styles}
+          />
+          <Info
+            label="Finished"
+            value={formatValue(pipeline.finished_at)}
+            styles={styles}
+          />
+          <Info
+            label="Duration"
+            value={
+              pipeline.duration_seconds !== null &&
+              pipeline.duration_seconds !== undefined
+                ? `${pipeline.duration_seconds.toFixed(1)}s`
+                : "-"
+            }
+            styles={styles}
+          />
+          <Info
+            label="Quality Gate"
+            value={
+              <span style={{ color: getGateColor(pipeline.quality_gate) }}>
+                {pipeline.quality_gate || "-"}
+              </span>
+            }
+            styles={styles}
+          />
+        </div>
       </section>
 
       <section style={styles.cardStyle}>
         <h2 style={styles.sectionTitleStyle}>SonarQube Metrics</h2>
 
         <div style={styles.gridStyle}>
-          <InfoCard title="Bugs" value={pipeline.bugs ?? "-"} styles={styles} />
-
-          <InfoCard
-            title="Vulnerabilities"
-            value={pipeline.vulnerabilities ?? "-"}
-            styles={styles}
-          />
-
-          <InfoCard
-            title="Code Smells"
-            value={pipeline.code_smells ?? "-"}
-            styles={styles}
-          />
-
-          <InfoCard
-            title="Duplication"
+          <Info
+            label="Coverage"
             value={
-              pipeline.duplicated_lines_density !== null &&
-              pipeline.duplicated_lines_density !== undefined
-                ? `${pipeline.duplicated_lines_density}%`
+              pipeline.coverage !== null && pipeline.coverage !== undefined
+                ? `${pipeline.coverage}%`
                 : "-"
             }
+            styles={styles}
+          />
+          <Info
+            label="Bugs"
+            value={formatValue(pipeline.bugs)}
+            styles={styles}
+          />
+          <Info
+            label="Vulnerabilities"
+            value={formatValue(pipeline.vulnerabilities)}
+            styles={styles}
+          />
+          <Info
+            label="Code Smells"
+            value={formatValue(pipeline.code_smells)}
             styles={styles}
           />
         </div>
@@ -169,9 +340,9 @@ export default function PipelineDetailsPage() {
             href={pipeline.sonar_report_url}
             target="_blank"
             rel="noopener noreferrer"
-            style={styles.primaryLinkButtonStyle}
+            style={styles.externalLinkStyle}
           >
-            Open SonarQube Report
+            Open SonarQube Report →
           </a>
         )}
       </section>
@@ -179,239 +350,103 @@ export default function PipelineDetailsPage() {
       <section style={styles.cardStyle}>
         <h2 style={styles.sectionTitleStyle}>SonarQube Issues</h2>
 
-        {pipeline.sonar_issues && pipeline.sonar_issues.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table style={styles.tableStyle}>
-              <thead>
-                <tr style={styles.tableHeaderRowStyle}>
-                  <th style={styles.th}>Severity</th>
-                  <th style={styles.th}>Type</th>
-                  <th style={styles.th}>Message</th>
-                  <th style={styles.th}>Line</th>
-                </tr>
-              </thead>
+        {pipeline.sonar_issues?.length ? (
+          <div style={styles.issueListStyle}>
+            {pipeline.sonar_issues.map((issue, index) => (
+              <div key={issue.key || index} style={styles.issueCardStyle}>
+                <div style={styles.issueHeaderStyle}>
+                  <span>{issue.severity || "UNKNOWN"}</span>
+                  <span>{issue.type || issue.rule || "Issue"}</span>
+                </div>
 
-              <tbody>
-                {pipeline.sonar_issues.map((issue: any) => (
-                  <tr key={issue.key} style={styles.tableRowStyle}>
-                    <td style={styles.td}>{issue.severity}</td>
-                    <td style={styles.td}>{issue.type}</td>
-                    <td style={styles.td}>{issue.message}</td>
-                    <td style={styles.td}>{issue.line || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                <p style={styles.issueMessageStyle}>
+                  {issue.message || "No message"}
+                </p>
+
+                <p style={styles.mutedTextStyle}>
+                  {issue.component || "Unknown component"}
+                  {issue.line ? `:${issue.line}` : ""}
+                </p>
+              </div>
+            ))}
           </div>
         ) : (
-          <p style={styles.paragraphStyle}>No SonarQube issues returned.</p>
-        )}
-      </section>
-
-      <section style={styles.cardStyle}>
-        <h2 style={styles.sectionTitleStyle}>AI DevOps Summary</h2>
-
-        {aiReport ? (
-          <>
-            <p style={styles.paragraphStyle}>
-              <strong>Final Status:</strong>{" "}
-              <span style={{ fontWeight: 700 }}>{aiReport.final_status}</span>
-            </p>
-
-            <p style={styles.paragraphStyle}>
-              <strong>Overall Summary:</strong> {aiReport.overall_summary}
-            </p>
-
-            <p style={styles.paragraphStyle}>
-              <strong>Log Summary:</strong> {aiReport.log_summary}
-            </p>
-
-            <p style={styles.paragraphStyle}>
-              <strong>SonarQube Summary:</strong> {aiReport.sonarqube_summary}
-            </p>
-
-            <p style={styles.paragraphStyle}>
-              <strong>Confidence:</strong> {aiReport.confidence}
-            </p>
-
-            <h3 style={styles.subSectionTitleStyle}>Priority Items</h3>
-
-            {priorityItems.length > 0 ? (
-              <div style={styles.priorityGridStyle}>
-                {priorityItems.map((item: any, index: number) => (
-                  <div key={index} style={styles.priorityItemCardStyle}>
-                    <p style={styles.paragraphStyle}>
-                      <strong>Priority:</strong>{" "}
-                      <span
-                        style={{
-                          color: getPriorityColor(item.priority),
-                          fontWeight: 700,
-                        }}
-                      >
-                        {item.priority}
-                      </span>
-                    </p>
-
-                    <p style={styles.paragraphStyle}>
-                      <strong>Issue:</strong> {item.issue}
-                    </p>
-
-                    <p style={styles.paragraphStyle}>
-                      <strong>Why it matters:</strong> {item.why_it_matters}
-                    </p>
-
-                    <p style={styles.paragraphStyle}>
-                      <strong>Suggested fix:</strong> {item.suggested_fix}
-                    </p>
-
-                    {item.helpful_link && (
-                      <a
-                        href={item.helpful_link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={styles.linkStyle}
-                      >
-                        Helpful Link
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p style={styles.paragraphStyle}>No priority items.</p>
-            )}
-
-            <h3 style={styles.subSectionTitleStyle}>How to Pass / Improve</h3>
-
-            <ul style={styles.listStyle}>
-              {(aiReport.how_to_pass || []).map(
-                (step: string, index: number) => (
-                  <li key={index}>{step}</li>
-                )
-              )}
-            </ul>
-          </>
-        ) : (
-          <p style={styles.paragraphStyle}>No AI summary available yet.</p>
+          <p style={styles.mutedTextStyle}>No SonarQube issues found.</p>
         )}
       </section>
 
       <section style={styles.cardStyle}>
         <h2 style={styles.sectionTitleStyle}>Logs</h2>
 
-        <pre style={styles.logBlockStyle}>
-          {pipeline.logs && pipeline.logs.length > 0
-            ? pipeline.logs.join("\n\n")
-            : "No logs yet."}
-        </pre>
+        {pipeline.logs?.length ? (
+          <div style={styles.logBoxStyle}>
+            {pipeline.logs.map((log, index) => renderLog(log, index))}
+          </div>
+        ) : (
+          <p style={styles.mutedTextStyle}>No logs available yet.</p>
+        )}
       </section>
-
-      <footer style={styles.footerStyle}>
-        Made by{" "}
-        <a
-          href="https://linktr.ee/_shounakchandra"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.footerLinkStyle}
-        >
-          Shounak
-        </a>{" "}
-        © 2026
-      </footer>
     </main>
   );
 }
 
-function InfoCard({
-  title,
+function Info({
+  label,
   value,
   styles,
 }: {
-  title: string;
-  value: string | number;
-  styles: ReturnType<typeof getStyles>;
+  label: string;
+  value: string | number | React.ReactNode;
+  styles: Record<string, CSSProperties>;
 }) {
   return (
-    <div style={styles.infoCardStyle}>
-      <p style={styles.infoCardTitleStyle}>{title}</p>
-      <h3 style={styles.infoCardValueStyle}>{value}</h3>
+    <div>
+      <div style={styles.infoLabelStyle}>{label}</div>
+      <div style={styles.infoValueStyle}>{value}</div>
     </div>
   );
-}
-
-function getPriorityColor(priority: string) {
-  if (priority === "HIGH") return "#dc2626";
-  if (priority === "MEDIUM") return "#ca8a04";
-
-  return "#16a34a";
 }
 
 function getStyles(isDark: boolean): Record<string, CSSProperties> {
   const colors = {
     pageBg: isDark ? "#020617" : "#f8fafc",
     cardBg: isDark ? "#0f172a" : "#ffffff",
-    infoCardBg: isDark ? "#111827" : "#f8fafc",
-    priorityCardBg: isDark ? "#111827" : "#ffffff",
-    tableHeader: isDark ? "#1e293b" : "#f1f5f9",
     text: isDark ? "#f8fafc" : "#0f172a",
-    muted: isDark ? "#cbd5e1" : "#64748b",
-    subtle: isDark ? "#94a3b8" : "#475569",
+    muted: isDark ? "#cbd5e1" : "#475569",
     border: isDark ? "#334155" : "#e2e8f0",
-    strongBorder: isDark ? "#475569" : "#cbd5e1",
     link: isDark ? "#60a5fa" : "#2563eb",
-    buttonBg: isDark ? "#f8fafc" : "#2563eb",
-    buttonText: isDark ? "#020617" : "#ffffff",
-    shadow: isDark
-      ? "0 1px 8px rgba(0,0,0,0.35)"
-      : "0 1px 4px rgba(0,0,0,0.08)",
+    logBg: isDark ? "#020617" : "#f1f5f9",
+    errorBg: isDark ? "#450a0a" : "#fee2e2",
+    errorText: isDark ? "#fecaca" : "#991b1b",
   };
 
   return {
     mainStyle: {
       padding: "40px",
-      fontFamily: "Arial",
-      background: colors.pageBg,
       minHeight: "100vh",
+      background: colors.pageBg,
       color: colors.text,
-      transition: "background 0.2s ease, color 0.2s ease",
+      fontFamily: "Arial",
     },
 
-    headerRowStyle: {
+    headerStyle: {
       display: "flex",
-      alignItems: "center",
       justifyContent: "space-between",
+      alignItems: "flex-start",
       gap: "20px",
-      marginBottom: "20px",
-    },
-
-    backLinkStyle: {
-      color: colors.link,
-      textDecoration: "none",
-      fontWeight: 600,
-    },
-
-    themeToggleButtonStyle: {
-      padding: "10px 14px",
-      borderRadius: "999px",
-      background: colors.cardBg,
-      color: colors.text,
-      border: `1px solid ${colors.strongBorder}`,
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: 600,
-      boxShadow: colors.shadow,
-      whiteSpace: "nowrap",
-    },
-
-    pageTitleStyle: {
-      marginTop: "20px",
-      fontSize: "32px",
-      color: colors.text,
-    },
-
-    pageSubtitleStyle: {
-      color: colors.muted,
+      marginTop: "24px",
       marginBottom: "24px",
+    },
+
+    titleStyle: {
+      fontSize: "32px",
+      marginBottom: "8px",
+      color: colors.text,
+    },
+
+    subtitleStyle: {
+      color: colors.muted,
+      wordBreak: "break-all",
     },
 
     cardStyle: {
@@ -419,10 +454,8 @@ function getStyles(isDark: boolean): Record<string, CSSProperties> {
       color: colors.text,
       padding: "24px",
       borderRadius: "12px",
-      boxShadow: colors.shadow,
       marginBottom: "24px",
       border: `1px solid ${colors.border}`,
-      transition: "background 0.2s ease, border 0.2s ease",
     },
 
     sectionTitleStyle: {
@@ -431,131 +464,108 @@ function getStyles(isDark: boolean): Record<string, CSSProperties> {
       color: colors.text,
     },
 
-    subSectionTitleStyle: {
-      marginTop: "20px",
-      marginBottom: "12px",
-      color: colors.text,
-    },
-
-    paragraphStyle: {
-      color: colors.text,
-      lineHeight: "1.6",
-    },
-
     gridStyle: {
       display: "grid",
-      gridTemplateColumns: "repeat(4, 1fr)",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
       gap: "16px",
-      marginBottom: "24px",
     },
 
-    infoCardStyle: {
-      background: colors.infoCardBg,
-      padding: "16px",
-      borderRadius: "10px",
-      border: `1px solid ${colors.border}`,
-      color: colors.text,
-    },
-
-    infoCardTitleStyle: {
-      color: colors.subtle,
-      marginBottom: "8px",
-      fontWeight: 600,
-    },
-
-    infoCardValueStyle: {
-      fontSize: "22px",
-      color: colors.text,
-      fontWeight: 700,
-    },
-
-    primaryLinkButtonStyle: {
-      display: "inline-block",
-      marginTop: "16px",
-      color: colors.buttonText,
-      background: colors.buttonBg,
-      padding: "10px 14px",
-      borderRadius: "8px",
-      textDecoration: "none",
-      fontWeight: 600,
-    },
-
-    tableStyle: {
-      width: "100%",
-      borderCollapse: "collapse",
-    },
-
-    tableHeaderRowStyle: {
-      background: colors.tableHeader,
-    },
-
-    tableRowStyle: {
-      borderBottom: `1px solid ${colors.border}`,
-    },
-
-    th: {
-      padding: "12px",
-      textAlign: "left",
+    infoLabelStyle: {
+      color: colors.muted,
       fontSize: "14px",
-      color: colors.text,
-      fontWeight: 700,
+      marginBottom: "6px",
     },
 
-    td: {
-      padding: "12px",
-      fontSize: "14px",
-      verticalAlign: "top",
+    infoValueStyle: {
       color: colors.text,
-    },
-
-    priorityGridStyle: {
-      display: "grid",
-      gap: "12px",
-    },
-
-    priorityItemCardStyle: {
-      border: `1px solid ${colors.strongBorder}`,
-      borderRadius: "10px",
-      padding: "14px",
-      background: colors.priorityCardBg,
-      color: colors.text,
-    },
-
-    listStyle: {
-      lineHeight: "1.8",
-      color: colors.text,
-      paddingLeft: "20px",
+      fontWeight: 600,
+      wordBreak: "break-all",
     },
 
     linkStyle: {
       color: colors.link,
       fontWeight: 600,
+      textDecoration: "none",
     },
 
-    logBlockStyle: {
-      background: "#020617",
-      color: "#22c55e",
-      padding: "20px",
-      borderRadius: "10px",
-      overflowX: "auto",
-      whiteSpace: "pre-wrap",
-      maxHeight: "600px",
-      border: `1px solid ${colors.strongBorder}`,
-    },
-
-    footerStyle: {
-      marginTop: "32px",
-      paddingTop: "20px",
-      borderTop: `1px solid ${colors.border}`,
-      textAlign: "center",
-      color: colors.muted,
-      fontSize: "14px",
-    },
-
-    footerLinkStyle: {
+    externalLinkStyle: {
+      display: "inline-block",
+      marginTop: "16px",
       color: colors.link,
       fontWeight: 600,
       textDecoration: "none",
+    },
+
+    statusBadgeStyle: {
+      color: "#ffffff",
+      padding: "8px 12px",
+      borderRadius: "999px",
+      fontSize: "13px",
+      fontWeight: 700,
+      whiteSpace: "nowrap",
+    },
+
+    issueListStyle: {
+      display: "grid",
+      gap: "12px",
+    },
+
+    issueCardStyle: {
+      border: `1px solid ${colors.border}`,
+      borderRadius: "10px",
+      padding: "14px",
+      background: colors.pageBg,
+    },
+
+    issueHeaderStyle: {
+      display: "flex",
+      justifyContent: "space-between",
+      gap: "12px",
+      fontSize: "13px",
+      fontWeight: 700,
+      color: colors.muted,
+      marginBottom: "8px",
+    },
+
+    issueMessageStyle: {
+      color: colors.text,
+      marginBottom: "8px",
+    },
+
+    logBoxStyle: {
+      background: colors.logBg,
+      border: `1px solid ${colors.border}`,
+      borderRadius: "10px",
+      padding: "16px",
+      maxHeight: "420px",
+      overflow: "auto",
+      fontFamily: "monospace",
+      fontSize: "13px",
+      lineHeight: "1.6",
+    },
+
+    logLineStyle: {
+      color: colors.text,
+      marginBottom: "6px",
+      whiteSpace: "pre-wrap",
+    },
+
+    logMetaStyle: {
+      color: colors.muted,
+      marginRight: "8px",
+    },
+
+    mutedTextStyle: {
+      color: colors.muted,
+    },
+
+    errorBoxStyle: {
+      marginTop: "24px",
+      padding: "16px",
+      borderRadius: "10px",
+      background: colors.errorBg,
+      color: colors.errorText,
+      border: `1px solid ${colors.errorText}`,
     },
   };
 }

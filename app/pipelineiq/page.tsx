@@ -3,12 +3,21 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { apiFetch, ApiError } from "@/lib/api";
+import { getCurrentUser, canTriggerPipeline } from "@/lib/auth";
+import type { AuthUser } from "@/lib/auth";
 
 type Pipeline = {
   id: string;
   repo_url: string;
   branch: string;
   status: string;
+  stage?: string | null;
+  progress?: number | null;
+  build_status?: string | null;
+  test_status?: string | null;
+  sonar_status?: string | null;
   created_at: string;
   duration_seconds: number | null;
   coverage?: number | null;
@@ -16,6 +25,15 @@ type Pipeline = {
   vulnerabilities?: number | null;
   code_smells?: number | null;
   quality_gate?: string | null;
+  trivy_critical?: number | null;
+  trivy_high?: number | null;
+  trivy_medium?: number | null;
+  trivy_low?: number | null;
+  trivy_total?: number | null;
+
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_summary?: string | null;
 };
 
 type Metrics = {
@@ -26,20 +44,65 @@ type Metrics = {
 };
 
 export default function Home() {
+  const router = useRouter();
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   const [repoUrl, setRepoUrl] = useState("");
   const [branch, setBranch] = useState("main");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [riskFilter, setRiskFilter] = useState("ALL");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [repoFilter, setRepoFilter] = useState("");
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedTestScript, setCopiedTestScript] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   const isDark = theme === "dark";
   const styles = getStyles(isDark);
+  const allowedToTrigger = canTriggerPipeline(user?.role);
+
+  useEffect(() => {
+  const timer = window.setTimeout(() => {
+    const savedTheme = window.localStorage.getItem("theme");
+
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
+    }
+
+    setUser(getCurrentUser());
+  }, 0);
+
+  return () => window.clearTimeout(timer);
+}, []);
 
   const testScriptSnippet = `"test": "echo \\"No tests configured yet\\" && exit 0"`;
+
+  const normalizedBranchFilter = branchFilter.trim().toLowerCase();
+  const normalizedRepoFilter = repoFilter.trim().toLowerCase();
+
+  const filteredPipelines = pipelines.filter((pipeline) => {
+    const matchesStatus =
+      statusFilter === "ALL" || pipeline.status === statusFilter;
+
+    const matchesRisk =
+      riskFilter === "ALL" || pipeline.risk_level === riskFilter;
+
+    const matchesBranch =
+      !normalizedBranchFilter ||
+      pipeline.branch.toLowerCase().includes(normalizedBranchFilter);
+
+    const matchesRepo =
+      !normalizedRepoFilter ||
+      pipeline.repo_url.toLowerCase().includes(normalizedRepoFilter);
+
+    return matchesStatus && matchesRisk && matchesBranch && matchesRepo;
+  });
 
   async function fetchPipelines() {
     const res = await fetch(`${API_URL}/pipelines`, {
@@ -64,23 +127,50 @@ export default function Home() {
   }
 
   async function triggerPipeline() {
+    setMessage("");
+    setError("");
+
+    if (!allowedToTrigger) {
+      setError("You do not have permission to trigger pipelines.");
+      return;
+    }
+
     setLoading(true);
 
-    await fetch(`${API_URL}/pipeline/trigger`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        repo_url: repoUrl,
-        branch,
-      }),
-    });
+    try {
+      await apiFetch("/pipeline/trigger", {
+        method: "POST",
+        body: JSON.stringify({
+          repo_url: repoUrl,
+          branch,
+        }),
+      });
 
-    await fetchPipelines();
-    await fetchMetrics();
+      setMessage("Pipeline triggered successfully.");
 
-    setLoading(false);
+      await fetchPipelines();
+      await fetchMetrics();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          setError("Please login to trigger a pipeline.");
+          router.push("/login");
+          return;
+        }
+
+        if (err.status === 403) {
+          setError("You do not have permission to trigger pipelines.");
+          return;
+        }
+
+        setError(err.message);
+        return;
+      }
+
+      setError("Something went wrong while triggering the pipeline.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function copyTestScript() {
@@ -111,49 +201,82 @@ export default function Home() {
   }
 
   useEffect(() => {
-    function syncThemeFromStorage() {
-      const savedTheme = localStorage.getItem("theme");
+  document.documentElement.setAttribute("data-theme", theme);
+}, [theme]);
 
-      if (savedTheme === "light" || savedTheme === "dark") {
-        setTheme(savedTheme);
-      }
+useEffect(() => {
+  function handlePlatformThemeChange(event: Event) {
+    const themeEvent = event as CustomEvent<"light" | "dark">;
+
+    if (themeEvent.detail === "light" || themeEvent.detail === "dark") {
+      setTheme(themeEvent.detail);
     }
+  }
 
-    function handlePlatformThemeChange(event: Event) {
-      const themeEvent = event as CustomEvent<"light" | "dark">;
+  function handleStorage(event: StorageEvent) {
+    if (event.key !== "theme") return;
 
-      if (themeEvent.detail === "light" || themeEvent.detail === "dark") {
-        setTheme(themeEvent.detail);
-      } else {
-        syncThemeFromStorage();
-      }
+    if (event.newValue === "light" || event.newValue === "dark") {
+      setTheme(event.newValue);
     }
+  }
 
-    syncThemeFromStorage();
+  window.addEventListener("platform-theme-change", handlePlatformThemeChange);
+  window.addEventListener("storage", handleStorage);
 
-    window.addEventListener("platform-theme-change", handlePlatformThemeChange);
-    window.addEventListener("storage", syncThemeFromStorage);
+  return () => {
+    window.removeEventListener(
+      "platform-theme-change",
+      handlePlatformThemeChange
+    );
+    window.removeEventListener("storage", handleStorage);
+  };
+}, []);
 
-    return () => {
-      window.removeEventListener(
-        "platform-theme-change",
-        handlePlatformThemeChange
-      );
-      window.removeEventListener("storage", syncThemeFromStorage);
-    };
-  }, []);
+useEffect(() => {
+  let cancelled = false;
 
-  useEffect(() => {
-    fetchPipelines();
-    fetchMetrics();
+  async function loadDashboardData() {
+    try {
+      const [pipelinesRes, metricsRes] = await Promise.all([
+          fetch(`${API_URL}/pipelines`, { cache: "no-store" }),
+          fetch(`${API_URL}/metrics`, { cache: "no-store" }),
+          ]);
 
-    const interval = setInterval(() => {
-      fetchPipelines();
-      fetchMetrics();
-    }, 3000);
+      const pipelinesData = await pipelinesRes.json();
 
-    return () => clearInterval(interval);
-  }, []);
+      let metricsData: Metrics | null = null;
+
+      try {
+        metricsData = await metricsRes.json();
+      } catch {
+        metricsData = null;
+      }
+
+      if (cancelled) return;
+
+      setPipelines(pipelinesData);
+      setMetrics(metricsData);
+    } catch {
+      if (cancelled) return;
+      setMetrics(null);
+    }
+  }
+
+  const initialLoad = window.setTimeout(() => {
+    void loadDashboardData();
+  }, 0);
+
+  const interval = window.setInterval(() => {
+    void loadDashboardData();
+  }, 3000);
+
+  return () => {
+    cancelled = true;
+    window.clearTimeout(initialLoad);
+    window.clearInterval(interval);
+  };
+}, [API_URL]);
 
   function getStatusColor(status: string) {
     if (status === "SUCCESS") return "#16a34a";
@@ -188,7 +311,9 @@ export default function Home() {
       </div>
 
       <section style={styles.cardStyle}>
-        <h2 style={styles.sectionTitleStyle}>Currently Supported Project Types</h2>
+        <h2 style={styles.sectionTitleStyle}>
+          Currently Supported Project Types
+        </h2>
 
         <p style={styles.sectionDescriptionStyle}>
           This MVP currently supports JavaScript/TypeScript projects that use
@@ -323,16 +448,30 @@ export default function Home() {
           style={styles.branchInputStyle}
         />
 
-        <button
-          onClick={triggerPipeline}
-          disabled={loading}
-          style={{
-            ...styles.buttonStyle,
-            opacity: loading ? 0.7 : 1,
-          }}
-        >
-          {loading ? "Triggering..." : "Run Pipeline"}
-        </button>
+        {allowedToTrigger ? (
+          <button
+            onClick={triggerPipeline}
+            disabled={loading}
+            style={{
+              ...styles.buttonStyle,
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Triggering..." : "Run Pipeline"}
+          </button>
+        ) : (
+          <button
+            disabled
+            style={styles.disabledButtonStyle}
+            title="Viewers cannot trigger pipelines"
+          >
+            Trigger Pipeline Disabled
+          </button>
+        )}
+
+        {message && <p style={styles.successMessageStyle}>{message}</p>}
+        {error && <p style={styles.errorMessageStyle}>{error}</p>}
       </section>
 
       {metrics && (
@@ -361,6 +500,82 @@ export default function Home() {
       )}
 
       <section style={styles.cardStyle}>
+        <div style={styles.sectionHeaderStyle}>
+          <div>
+            <h2 style={styles.sectionTitleStyle}>Pipeline Filters</h2>
+            <p style={styles.mutedTextStyle}>
+              Filter pipeline runs by status, risk level, branch, or repository.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter("ALL");
+              setRiskFilter("ALL");
+              setBranchFilter("");
+              setRepoFilter("");
+            }}
+            style={styles.secondaryButtonStyle}
+          >
+            Clear Filters
+          </button>
+        </div>
+
+        <div style={styles.filterGridStyle}>
+          <label style={styles.inputGroupStyle}>
+            <span style={styles.labelStyle}>Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              style={styles.inputStyle}
+            >
+              <option value="ALL">ALL</option>
+              <option value="PENDING">PENDING</option>
+              <option value="RUNNING">RUNNING</option>
+              <option value="SUCCESS">SUCCESS</option>
+              <option value="FAILED">FAILED</option>
+            </select>
+          </label>
+
+          <label style={styles.inputGroupStyle}>
+            <span style={styles.labelStyle}>Risk</span>
+            <select
+              value={riskFilter}
+              onChange={(event) => setRiskFilter(event.target.value)}
+              style={styles.inputStyle}
+            >
+              <option value="ALL">ALL</option>
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+          </label>
+
+          <label style={styles.inputGroupStyle}>
+            <span style={styles.labelStyle}>Branch</span>
+            <input
+              value={branchFilter}
+              onChange={(event) => setBranchFilter(event.target.value)}
+              placeholder="cicd_test"
+              style={styles.inputStyle}
+            />
+          </label>
+
+          <label style={styles.inputGroupStyle}>
+            <span style={styles.labelStyle}>Repository</span>
+            <input
+              value={repoFilter}
+              onChange={(event) => setRepoFilter(event.target.value)}
+              placeholder="meetup"
+              style={styles.inputStyle}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section style={styles.cardStyle}>
         <h2 style={styles.sectionTitleStyle}>Pipelines</h2>
 
         <div style={{ overflowX: "auto" }}>
@@ -379,7 +594,7 @@ export default function Home() {
             </thead>
 
             <tbody>
-              {pipelines.map((pipeline) => (
+              {filteredPipelines.map((pipeline) => (
                 <tr key={pipeline.id} style={styles.tableRowStyle}>
                   <td style={styles.td}>
                     <Link
@@ -435,6 +650,21 @@ export default function Home() {
                   </td>
                 </tr>
               ))}
+
+              {filteredPipelines.length === 0 && (
+                <tr style={styles.tableRowStyle}>
+                  <td
+                    colSpan={8}
+                    style={{
+                      ...styles.td,
+                      color: isDark ? "#cbd5e1" : "#64748b",
+                      textAlign: "center",
+                    }}
+                  >
+                    No pipelines match the selected filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -492,6 +722,7 @@ function getStyles(isDark: boolean): Record<string, CSSProperties> {
     link: isDark ? "#60a5fa" : "#2563eb",
     green: isDark ? "#4ade80" : "#166534",
     amber: isDark ? "#fbbf24" : "#92400e",
+    red: isDark ? "#f87171" : "#b91c1c",
     noteBg: isDark ? "#1e293b" : "#f1f5f9",
     shadow: isDark
       ? "0 1px 8px rgba(0,0,0,0.35)"
@@ -551,10 +782,64 @@ function getStyles(isDark: boolean): Record<string, CSSProperties> {
       transition: "background 0.2s ease, border 0.2s ease",
     },
 
+    sectionHeaderStyle: {
+      display: "flex",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: "16px",
+      marginBottom: "18px",
+    },
+
     sectionTitleStyle: {
       fontSize: "22px",
       marginBottom: "16px",
       color: colors.text,
+    },
+
+    mutedTextStyle: {
+      color: colors.muted,
+      margin: 0,
+      lineHeight: "1.5",
+    },
+
+    filterGridStyle: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+      gap: "16px",
+    },
+
+    inputGroupStyle: {
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+    },
+
+    labelStyle: {
+      fontSize: "13px",
+      fontWeight: 700,
+      color: isDark ? "#cbd5e1" : "#374151",
+    },
+
+    inputStyle: {
+      width: "100%",
+      borderRadius: "10px",
+      border: `1px solid ${isDark ? "#334155" : "#d1d5db"}`,
+      background: isDark ? "#020617" : "#ffffff",
+      color: isDark ? "#f8fafc" : "#111827",
+      padding: "10px 12px",
+      fontSize: "14px",
+      outline: "none",
+    },
+
+    secondaryButtonStyle: {
+      border: `1px solid ${isDark ? "#334155" : "#d1d5db"}`,
+      background: isDark ? "#0f172a" : "#ffffff",
+      color: isDark ? "#f8fafc" : "#111827",
+      padding: "10px 14px",
+      borderRadius: "10px",
+      cursor: "pointer",
+      fontWeight: 700,
+      whiteSpace: "nowrap",
     },
 
     sectionDescriptionStyle: {
@@ -674,6 +959,30 @@ function getStyles(isDark: boolean): Record<string, CSSProperties> {
       color: colors.buttonText,
       border: "none",
       cursor: "pointer",
+      fontWeight: 600,
+    },
+
+    disabledButtonStyle: {
+      padding: "12px 20px",
+      borderRadius: "8px",
+      background: "#334155",
+      color: "#94a3b8",
+      border: "none",
+      cursor: "not-allowed",
+      fontWeight: 600,
+    },
+
+    successMessageStyle: {
+      marginTop: "12px",
+      color: colors.green,
+      fontSize: "14px",
+      fontWeight: 600,
+    },
+
+    errorMessageStyle: {
+      marginTop: "12px",
+      color: colors.red,
+      fontSize: "14px",
       fontWeight: 600,
     },
 
