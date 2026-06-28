@@ -13,6 +13,7 @@ const navItems = [
   { label: "Services", href: "/services" },
   { label: "PipelineIQ", href: "/pipelineiq" },
   { label: "Deployments", href: "/deployments" },
+  { href: "/events", label: "Event Explorer" },
   { label: "Audit Logs", href: "/audit-logs" },
   { label: "Settings", href: "/settings" },
 ];
