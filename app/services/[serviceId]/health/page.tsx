@@ -18,6 +18,9 @@ type HealthSummary = {
   created_at?: string | null;
 };
 
+const GRAFANA_URL =
+  process.env.NEXT_PUBLIC_GRAFANA_URL || "http://localhost:3002";
+
 type Incident = {
   id: string;
   title: string;
@@ -37,6 +40,93 @@ type TimelineItem = {
   details: Record<string, unknown>;
 };
 
+function normalizeArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) {
+    return value as T[];
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    if (Array.isArray(record.timeline)) return record.timeline as T[];
+    if (Array.isArray(record.incidents)) return record.incidents as T[];
+    if (Array.isArray(record.events)) return record.events as T[];
+    if (Array.isArray(record.items)) return record.items as T[];
+    if (Array.isArray(record.data)) return record.data as T[];
+    if (Array.isArray(record.results)) return record.results as T[];
+  }
+
+  return [];
+}
+
+function formatLabel(value?: string | null) {
+  if (!value) return "Unknown";
+
+  return value
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function timelineTitle(item: TimelineItem) {
+  const eventType = item.event_type?.toUpperCase();
+  const source = item.source?.toLowerCase();
+
+  switch (eventType) {
+    case "INCIDENT_CREATED":
+      return "Incident created";
+    case "INCIDENT_ACKNOWLEDGED":
+      return "Incident acknowledged";
+    case "INCIDENT_RESOLVED":
+      return "Incident resolved";
+    case "INCIDENT_ESCALATED":
+      return "Incident escalated";
+    case "HIGH_ERROR_RATE":
+      return "High error rate detected";
+    case "HIGH_LATENCY":
+      return "High latency detected";
+    case "POD_RESTARTS":
+      return "Pod restarts detected";
+    case "REPLICA_UNAVAILABLE":
+      return "Replica availability degraded";
+    default:
+      if (source === "service_health_snapshots") {
+        return "Health snapshot recorded";
+      }
+
+      if (source === "incident_events") {
+        return formatLabel(item.event_type || item.title);
+      }
+
+      return item.title || formatLabel(item.event_type || item.source);
+  }
+}
+
+function timelineSubtitle(item: TimelineItem) {
+  const source = formatLabel(item.source);
+  const eventType = formatLabel(item.event_type);
+
+  return `${source} · ${eventType}`;
+}
+
+function timelineIcon(item: TimelineItem) {
+  const eventType = item.event_type?.toUpperCase();
+  const source = item.source?.toLowerCase();
+
+  if (eventType === "INCIDENT_RESOLVED") return "✅";
+  if (eventType === "INCIDENT_ACKNOWLEDGED") return "👀";
+  if (eventType === "INCIDENT_CREATED") return "🚨";
+  if (eventType === "INCIDENT_ESCALATED") return "🔥";
+  if (eventType === "HIGH_ERROR_RATE") return "📉";
+  if (eventType === "HIGH_LATENCY") return "🐢";
+  if (eventType === "POD_RESTARTS") return "🔁";
+  if (eventType === "REPLICA_UNAVAILABLE") return "⚠️";
+  if (source === "service_health_snapshots") return "📈";
+
+  return "•";
+}
+
 function statusClass(status: string) {
   switch (status) {
     case "HEALTHY":
@@ -44,7 +134,6 @@ function statusClass(status: string) {
     case "DEGRADED":
       return "bg-yellow-100 text-yellow-700 border-yellow-200";
     case "UNHEALTHY":
-      return "bg-red-100 text-red-700 border-red-200";
     case "OPEN":
       return "bg-red-100 text-red-700 border-red-200";
     case "ACKNOWLEDGED":
@@ -79,10 +168,13 @@ export default function ServiceHealthPage() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadServiceHealth() {
       try {
+        setError(null);
+
         const [rawHealthData, rawIncidentsData, rawTimelineData] =
           await Promise.all([
             apiFetch(`/api/observability/services/${serviceId}/health`),
@@ -90,13 +182,14 @@ export default function ServiceHealthPage() {
             apiFetch(`/api/services/${serviceId}/runtime-timeline`),
           ]);
 
-        const healthData = rawHealthData as HealthSummary;
-        const incidentsData = rawIncidentsData as Incident[];
-        const timelineData = rawTimelineData as TimelineItem[];
-
-        setHealth(healthData);
-        setIncidents(incidentsData);
-        setTimeline(timelineData);
+        setHealth(rawHealthData as HealthSummary);
+        setIncidents(normalizeArray<Incident>(rawIncidentsData));
+        setTimeline(normalizeArray<TimelineItem>(rawTimelineData));
+      } catch (err) {
+        console.error(err);
+        setError(
+          "Failed to load service health. Check that the backend is running and the runtime timeline routes are registered."
+        );
       } finally {
         setLoading(false);
       }
@@ -111,10 +204,35 @@ export default function ServiceHealthPage() {
     return <div className="p-6">Loading service health...</div>;
   }
 
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <Link
+          href="/observability"
+          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          ← Back to Observability
+        </Link>
+
+        <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   if (!health) {
     return (
       <div className="p-6 space-y-4">
+        <Link
+          href="/observability"
+          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          ← Back to Observability
+        </Link>
+
         <h1 className="text-2xl font-semibold">Service Health</h1>
+
         <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500">
           No health snapshot found for this service.
         </div>
@@ -149,6 +267,47 @@ export default function ServiceHealthPage() {
           </span>
         </div>
       </div>
+
+      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Grafana Dashboards</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Open deep metrics dashboards for service health, backend metrics,
+              and incidents.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <a
+            href={`${GRAFANA_URL}/d/platformiq-backend/platformiq-backend`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            PlatformIQ Backend Metrics
+          </a>
+
+          <a
+            href={`${GRAFANA_URL}/d/payment-service/payment-service`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            Payment Service Metrics
+          </a>
+
+          <a
+            href={`${GRAFANA_URL}/d/incident-overview/incident-overview`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            Incident Overview Metrics
+          </a>
+        </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-5">
         <Metric
@@ -246,12 +405,18 @@ export default function ServiceHealthPage() {
                 key={`${item.timestamp}-${item.event_type}-${index}`}
                 className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
               >
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="font-medium">{item.title}</p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {item.source} · {item.event_type}
-                    </p>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="flex gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-sm dark:bg-zinc-900">
+                      {timelineIcon(item)}
+                    </div>
+
+                    <div>
+                      <p className="font-medium">{timelineTitle(item)}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {timelineSubtitle(item)}
+                      </p>
+                    </div>
                   </div>
 
                   <p className="text-xs text-zinc-500">
@@ -260,9 +425,15 @@ export default function ServiceHealthPage() {
                 </div>
 
                 {item.details && Object.keys(item.details).length > 0 && (
-                  <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
-                    {JSON.stringify(item.details, null, 2)}
-                  </pre>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+                      View metadata
+                    </summary>
+
+                    <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
+                      {JSON.stringify(item.details, null, 2)}
+                    </pre>
+                  </details>
                 )}
               </div>
             ))}
