@@ -1,9 +1,11 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getCurrentUser, logout } from "@/lib/auth";
 import type { AuthUser } from "@/lib/auth";
 
@@ -13,68 +15,32 @@ const navItems = [
   { label: "Services", href: "/services" },
   { label: "PipelineIQ", href: "/pipelineiq" },
   { label: "Deployments", href: "/deployments" },
-  { href: "/events", label: "Event Explorer" },
+  { label: "Event Explorer", href: "/events" },
   { label: "Observability", href: "/observability" },
   { label: "Incidents", href: "/incidents" },
   { label: "Audit Logs", href: "/audit-logs" },
   { label: "Settings", href: "/settings" },
 ];
 
-type Theme = "light" | "dark";
-
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const [theme, setTheme] = useState<Theme>("dark");
   const [user, setUser] = useState<AuthUser | null>(null);
 
-  const isDark = theme === "dark";
-
-  function applyTheme(nextTheme: Theme, shouldBroadcast = true) {
-    setTheme(nextTheme);
-    localStorage.setItem("theme", nextTheme);
-    document.documentElement.setAttribute("data-theme", nextTheme);
-
-    if (shouldBroadcast) {
-      window.dispatchEvent(
-        new CustomEvent("platform-theme-change", { detail: nextTheme })
-      );
-    }
-  }
-
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
+    /*
+     * Run the initial browser-only auth check asynchronously.
+     * This avoids calling setState directly in the effect body.
+     */
     const timer = window.setTimeout(() => {
-      const savedTheme = localStorage.getItem("theme");
-
-      if (savedTheme === "light" || savedTheme === "dark") {
-        setTheme(savedTheme);
-        document.documentElement.setAttribute("data-theme", savedTheme);
-      } else {
-        document.documentElement.setAttribute("data-theme", "dark");
-      }
-
       setUser(getCurrentUser());
     }, 0);
-
-    function handlePlatformThemeChange(event: Event) {
-      const themeEvent = event as CustomEvent<Theme>;
-
-      if (themeEvent.detail === "light" || themeEvent.detail === "dark") {
-        setTheme(themeEvent.detail);
-        document.documentElement.setAttribute("data-theme", themeEvent.detail);
-      }
-    }
 
     function handleAuthChange() {
       setUser(getCurrentUser());
     }
 
-    window.addEventListener("platform-theme-change", handlePlatformThemeChange);
     window.addEventListener("platform-auth-change", handleAuthChange);
     window.addEventListener("storage", handleAuthChange);
 
@@ -82,80 +48,53 @@ export default function AppShell({ children }: { children: ReactNode }) {
       window.clearTimeout(timer);
 
       window.removeEventListener(
-        "platform-theme-change",
-        handlePlatformThemeChange
+        "platform-auth-change",
+        handleAuthChange
       );
-      window.removeEventListener("platform-auth-change", handleAuthChange);
+
       window.removeEventListener("storage", handleAuthChange);
     };
   }, []);
 
-  function toggleTheme() {
-    const nextTheme: Theme = isDark ? "light" : "dark";
-    applyTheme(nextTheme);
-  }
-
   function handleLogout() {
     logout();
     setUser(null);
+
     window.dispatchEvent(new Event("platform-auth-change"));
+
     router.push("/login");
     router.refresh();
   }
 
-  const themeVars = {
-    "--page-bg": isDark ? "#020617" : "#f8fafc",
-    "--sidebar-bg": isDark ? "#0f172a" : "#ffffff",
-    "--sidebar-border": isDark ? "#1e293b" : "#e2e8f0",
-
-    "--text-main": isDark ? "#f8fafc" : "#0f172a",
-    "--text-muted": isDark ? "#cbd5e1" : "#475569",
-
-    "--nav-text": isDark ? "#ffffff" : "#0f172a",
-    "--nav-hover": isDark ? "#1e293b" : "#e2e8f0",
-
-    "--card-bg": isDark ? "#111827" : "#ffffff",
-    "--card-border": isDark ? "#334155" : "#e2e8f0",
-
-    "--button-bg": isDark ? "#f8fafc" : "#111827",
-    "--button-text": isDark ? "#020617" : "#ffffff",
-  } as CSSProperties;
-
   return (
-    <div
-      style={themeVars}
-      className="min-h-screen bg-[var(--page-bg)] text-[var(--text-main)] transition-colors"
-    >
+    <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50">
       <div className="flex min-h-screen">
-        <aside className="flex min-h-screen w-64 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] p-6 transition-colors">
+        <aside className="flex min-h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-6 transition-colors duration-200 dark:border-slate-800 dark:bg-slate-900">
+          {/* Logo */}
           <Link href="/" className="block">
-            <div
-              className="text-2xl font-bold tracking-tight"
-              style={{ color: "var(--text-main)" }}
-            >
+            <div className="text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-50">
               PlatformIQ
             </div>
 
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
               Intelligent software delivery platform
             </p>
           </Link>
 
-          <div className="mt-6 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3 text-sm transition-colors">
+          {/* User information */}
+          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm transition-colors dark:border-slate-700 dark:bg-slate-800/60">
             {user ? (
               <>
-                <p
-                  className="break-words font-semibold"
-                  style={{ color: "var(--text-main)" }}
-                >
+                <p className="break-words font-semibold text-slate-950 dark:text-slate-50">
                   {user.email}
                 </p>
 
-                <p className="mt-1" style={{ color: "var(--text-muted)" }}>
+                <p className="mt-1 text-slate-600 dark:text-slate-400">
                   Role: {user.role}
                 </p>
 
                 <button
+                  type="button"
                   onClick={handleLogout}
                   className="mt-3 w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-500"
                 >
@@ -165,23 +104,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
             ) : (
               <Link
                 href="/login"
-                className="block rounded-lg bg-blue-600 px-3 py-2 text-center font-medium transition hover:bg-blue-500"
-                style={{ color: "#ffffff" }}
+                className="block rounded-lg bg-blue-600 px-3 py-2 text-center font-medium text-white transition hover:bg-blue-500"
               >
                 Login
               </Link>
             )}
           </div>
 
-          <button
-            onClick={toggleTheme}
-            className="mt-6 rounded-full border border-[var(--sidebar-border)] bg-[var(--button-bg)] px-4 py-2 text-sm font-semibold transition"
-            style={{ color: "var(--button-text)" }}
-          >
-            {isDark ? "☀️ Light Mode" : "🌙 Dark Mode"}
-          </button>
-
-          <nav className="mt-8 space-y-2">
+          {/* Navigation */}
+          <nav className="mt-8 flex-1 space-y-2">
             {navItems.map((item) => {
               const active =
                 item.href === "/"
@@ -193,20 +124,29 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   key={item.href}
                   href={item.href}
                   className={`block rounded-lg px-4 py-3 text-sm font-medium transition ${
-                    active ? "bg-blue-600" : "hover:bg-[var(--nav-hover)]"
+                    active
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-800 hover:bg-slate-200 dark:text-slate-100 dark:hover:bg-slate-800"
                   }`}
-                  style={{
-                    color: active ? "#ffffff" : "var(--nav-text)",
-                  }}
                 >
                   {item.label}
                 </Link>
               );
             })}
           </nav>
+
+          {/* Sidebar footer */}
+          <div className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Appearance
+            </p>
+
+            <ThemeToggle />
+          </div>
         </aside>
 
-        <main className="flex-1 bg-[var(--page-bg)] p-8 transition-colors">
+        {/* Page content */}
+        <main className="min-w-0 flex-1 bg-slate-50 p-8 transition-colors duration-200 dark:bg-slate-950">
           {children}
         </main>
       </div>

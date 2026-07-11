@@ -1,121 +1,381 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
 type EventRecord = {
   event_id: string;
-  event_type: string;
-  topic: string;
+
+  event_type?: string | null;
+  type?: string | null;
+  topic?: string | null;
+
   service_id?: string | null;
+  service?: string | null;
+  service_name?: string | null;
+
   environment?: string | null;
+  severity?: string | null;
+
   correlation_id?: string | null;
+  correlationId?: string | null;
+
   timestamp?: string | null;
-  processing_status: string;
+  created_at?: string | null;
+  received_at?: string | null;
+
+  processed?: boolean;
+  processing_status?: string | null;
   processing_error?: string | null;
-  payload: Record<string, unknown>;
-  raw_event: Record<string, unknown>;
+
+  payload?: Record<string, unknown> | null;
+  raw_event?: Record<string, unknown> | null;
+};
+
+const formatLabel = (value?: string | null) => {
+  if (!value) {
+    return "Not available";
+  }
+
+  const readableText = value.toLowerCase().replaceAll("_", " ");
+
+  return readableText.charAt(0).toUpperCase() + readableText.slice(1);
+};
+
+const formatTimestamp = (value?: string | null) => {
+  if (!value) {
+    return "Not available";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+};
+
+const getSeverityClasses = (severity?: string | null) => {
+  switch (severity?.toUpperCase()) {
+    case "CRITICAL":
+    case "ERROR":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+
+    case "WARNING":
+    case "WARN":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+
+    case "INFO":
+    case "INFORMATIONAL":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-400";
+
+    default:
+      return "border-slate-500/30 bg-slate-500/10 text-slate-400";
+  }
+};
+
+const getProcessingStatusClasses = (status?: string | null) => {
+  switch (status?.toUpperCase()) {
+    case "PROCESSED":
+    case "COMPLETED":
+    case "SUCCESS":
+      return "border-green-500/30 bg-green-500/10 text-green-400";
+
+    case "FAILED":
+    case "ERROR":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+
+    case "PENDING":
+    case "PROCESSING":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+
+    default:
+      return "border-slate-500/30 bg-slate-500/10 text-slate-400";
+  }
 };
 
 export default function EventDetailPage() {
-  const params = useParams();
-  const eventId = params.eventId as string;
+  const params = useParams<{ eventId: string }>();
+  const eventId = params.eventId;
 
   const [event, setEvent] = useState<EventRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-  if (!eventId) return;
+    let cancelled = false;
 
-  let cancelled = false;
+    async function loadEvent() {
+      setLoading(true);
+      setError(null);
 
-  async function loadEvent() {
-    setLoading(true);
+      try {
+        const data = await apiFetch<EventRecord>(
+          `/api/events/${encodeURIComponent(eventId)}`
+        );
 
-    try {
-      const data = await apiFetch<EventRecord>(`/api/events/${eventId}`);
-
-      if (!cancelled) {
-        setEvent(data);
-      }
-    } finally {
-      if (!cancelled) {
-        setLoading(false);
+        if (!cancelled) {
+          setEvent(data);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setEvent(null);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Unable to load the event."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
-  }
 
-  const timer = window.setTimeout(() => {
-    void loadEvent();
-  }, 0);
+    const timer = window.setTimeout(() => {
+      void loadEvent();
+    }, 0);
 
-  return () => {
-    cancelled = true;
-    window.clearTimeout(timer);
-  };
-}, [eventId]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [eventId]);
 
   if (loading) {
-    return <main>Loading event...</main>;
+    return (
+      <main className="space-y-6">
+        <BackLink />
+
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">
+          Loading event...
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="space-y-6">
+        <BackLink />
+
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-5">
+          <h1 className="font-semibold text-red-400">
+            Unable to load event
+          </h1>
+
+          <p className="mt-2 text-sm text-red-300">{error}</p>
+        </div>
+      </main>
+    );
   }
 
   if (!event) {
-    return <main>Event not found.</main>;
+    return (
+      <main className="space-y-6">
+        <BackLink />
+
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+          <h1 className="font-semibold text-white">Event not found</h1>
+
+          <p className="mt-2 text-sm text-slate-400">
+            The requested event could not be found.
+          </p>
+        </div>
+      </main>
+    );
   }
+
+  const eventType = event.event_type ?? event.type;
+
+  const service =
+    event.service ??
+    event.service_name ??
+    event.service_id ??
+    "Not available";
+
+  const correlationId =
+    event.correlation_id ??
+    event.correlationId ??
+    "Not available";
+
+  const timestamp =
+    event.timestamp ??
+    event.created_at ??
+    event.received_at;
+
+  const processingStatus =
+    event.processing_status ??
+    (event.processed === true
+      ? "PROCESSED"
+      : event.processed === false
+        ? "PENDING"
+        : "Not available");
 
   return (
     <main className="space-y-6">
+      <BackLink />
+
       <div>
-        <h1 className="text-2xl font-semibold">{event.event_type}</h1>
-        <p className="text-sm text-gray-500">{event.event_id}</p>
+        <h1 className="text-2xl font-bold text-white">
+          Event Details
+        </h1>
+
+        <p className="mt-1 text-sm text-slate-400">
+          Inspect the event metadata, processing state and payload.
+        </p>
+
+        <code className="mt-2 block break-all text-xs text-slate-500">
+          {event.event_id}
+        </code>
       </div>
 
-      <section className="rounded-xl border p-4">
-        <h2 className="mb-4 font-medium">Metadata</h2>
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <DetailField
+          label="Event Type"
+          value={formatLabel(eventType)}
+        />
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Info label="Topic" value={event.topic} />
-          <Info label="Service" value={event.service_id || "-"} />
-          <Info label="Environment" value={event.environment || "-"} />
-          <Info label="Correlation ID" value={event.correlation_id || "-"} />
-          <Info
-            label="Timestamp"
-            value={event.timestamp ? new Date(event.timestamp).toLocaleString() : "-"}
-          />
-          <Info label="Processing Status" value={event.processing_status} />
+        <DetailField
+          label="Topic"
+          value={event.topic ?? "Not available"}
+        />
+
+        <DetailField
+          label="Service"
+          value={service}
+        />
+
+        <DetailField
+          label="Environment"
+          value={formatLabel(event.environment)}
+        />
+
+        <DetailField
+          label="Severity"
+          value={
+            event.severity ? (
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getSeverityClasses(
+                  event.severity
+                )}`}
+              >
+                {formatLabel(event.severity)}
+              </span>
+            ) : (
+              "Not available"
+            )
+          }
+        />
+
+        <DetailField
+          label="Correlation ID"
+          value={
+            <code className="break-all text-xs text-blue-300">
+              {correlationId}
+            </code>
+          }
+        />
+
+        <DetailField
+          label="Processing Status"
+          value={
+            processingStatus === "Not available" ? (
+              "Not available"
+            ) : (
+              <span
+                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getProcessingStatusClasses(
+                  processingStatus
+                )}`}
+              >
+                {formatLabel(processingStatus)}
+              </span>
+            )
+          }
+        />
+
+        <DetailField
+          label="Timestamp"
+          value={formatTimestamp(timestamp)}
+        />
+      </section>
+
+      {event.processing_error && (
+        <section className="rounded-xl border border-red-500/30 bg-red-500/10 p-5">
+          <h2 className="font-semibold text-red-400">
+            Processing Error
+          </h2>
+
+          <p className="mt-2 break-words text-sm text-red-300">
+            {event.processing_error}
+          </p>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-white">
+            Payload
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-400">
+            Structured data submitted with this event.
+          </p>
         </div>
 
-        {event.processing_error && (
-          <div className="mt-4 rounded-md border p-3 text-sm">
-            <p className="font-medium">Processing Error</p>
-            <p>{event.processing_error}</p>
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-xl border p-4">
-        <h2 className="mb-4 font-medium">Payload</h2>
-        <pre className="overflow-auto rounded-md border p-4 text-xs">
-          {JSON.stringify(event.payload, null, 2)}
+        <pre className="max-h-[400px] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-6 text-slate-300">
+          {JSON.stringify(event.payload ?? {}, null, 2)}
         </pre>
       </section>
 
-      <section className="rounded-xl border p-4">
-        <h2 className="mb-4 font-medium">Raw Event</h2>
-        <pre className="overflow-auto rounded-md border p-4 text-xs">
-          {JSON.stringify(event.raw_event, null, 2)}
-        </pre>
-      </section>
+      <details className="rounded-xl border border-slate-800 bg-slate-900">
+        <summary className="cursor-pointer px-5 py-4 font-semibold text-white">
+          Raw Event
+        </summary>
+
+        <div className="border-t border-slate-800 p-5">
+          <pre className="max-h-[500px] overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-6 text-slate-300">
+            {JSON.stringify(event.raw_event ?? event, null, 2)}
+          </pre>
+        </div>
+      </details>
     </main>
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function BackLink() {
   return (
-    <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className="font-medium break-all">{value}</p>
+    <Link
+      href="/events"
+      className="inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-white"
+    >
+      <span aria-hidden="true">←</span>
+      Back to Event Explorer
+    </Link>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+
+      <div className="mt-2 break-words text-sm font-medium text-slate-100">
+        {value ?? "Not available"}
+      </div>
     </div>
   );
 }

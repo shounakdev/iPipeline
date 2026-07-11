@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,12 +6,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
+type IncidentStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+
 type Incident = {
   id: string;
   title: string;
   description?: string | null;
   severity: string;
-  status: string;
+  status: IncidentStatus | string;
   service_id: string;
   environment: string;
   correlation_id?: string | null;
@@ -19,12 +22,90 @@ type Incident = {
   resolved_at?: string | null;
 };
 
+type TimelinePayload = Record<string, unknown> & {
+  event_type?: string | null;
+};
+
 type TimelineItem = {
-  timestamp: string;
-  source: string;
-  event_type: string;
-  title: string;
-  details: Record<string, unknown>;
+  id?: string | null;
+  event_id?: string | null;
+  timestamp?: string | null;
+  created_at?: string | null;
+  source?: string | null;
+  event_type?: string | null;
+  eventType?: string | null;
+  type?: string | null;
+  action?: string | null;
+  title?: string | null;
+  details?: Record<string, unknown> | null;
+  metadata?: TimelinePayload | null;
+  payload?: TimelinePayload | null;
+};
+
+const INCIDENT_EVENT_LABELS: Record<string, string> = {
+  HEALTH_SNAPSHOT_RECORDED: "Health snapshot recorded",
+  HIGH_ERROR_RATE: "High error rate detected",
+  HIGH_LATENCY: "High latency detected",
+  POD_RESTART_SPIKE: "Pod restart spike detected",
+  POD_RESTARTS: "Pod restarts detected",
+  REPLICA_UNAVAILABLE: "Replica availability degraded",
+  SERVICE_DEGRADED: "Service degraded",
+  INCIDENT_CREATED: "Incident created",
+  INCIDENT_ACKNOWLEDGED: "Incident acknowledged",
+  INCIDENT_RESOLVED: "Incident resolved",
+  INCIDENT_ESCALATED: "Incident escalated",
+};
+
+const getStatusBadgeClasses = (status?: string | null) => {
+  switch (status?.toUpperCase()) {
+    case "OPEN":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+
+    case "ACKNOWLEDGED":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+
+    case "RESOLVED":
+      return "border-green-500/30 bg-green-500/10 text-green-400";
+
+    default:
+      return "border-slate-500/30 bg-slate-500/10 text-slate-400";
+  }
+};
+
+const humanizeEventType = (eventType?: string | null) => {
+  if (!eventType) {
+    return "Incident event";
+  }
+
+  const normalizedType = eventType.toUpperCase();
+
+  if (INCIDENT_EVENT_LABELS[normalizedType]) {
+    return INCIDENT_EVENT_LABELS[normalizedType];
+  }
+
+  const readableText = normalizedType.toLowerCase().replaceAll("_", " ");
+
+  return readableText.charAt(0).toUpperCase() + readableText.slice(1);
+};
+
+const getTimelineEventType = (event: TimelineItem) => {
+  return (
+    event.event_type ??
+    event.eventType ??
+    event.type ??
+    event.action ??
+    event.metadata?.event_type ??
+    event.payload?.event_type ??
+    null
+  );
+};
+
+const getTimelineTimestamp = (event: TimelineItem) => {
+  return event.timestamp ?? event.created_at ?? null;
+};
+
+const getTimelineDetails = (event: TimelineItem) => {
+  return event.details ?? event.payload ?? event.metadata ?? null;
 };
 
 function normalizeArray<T>(value: unknown): T[] {
@@ -57,59 +138,8 @@ async function fetchIncidentData(incidentId: string) {
   };
 }
 
-function formatLabel(value?: string | null) {
-  if (!value) return "Unknown";
-
-  return value
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function timelineTitle(item: TimelineItem) {
-  const eventType = item.event_type?.toUpperCase();
-  const source = item.source?.toLowerCase();
-
-  switch (eventType) {
-    case "INCIDENT_CREATED":
-      return "Incident created";
-    case "INCIDENT_ACKNOWLEDGED":
-      return "Incident acknowledged";
-    case "INCIDENT_RESOLVED":
-      return "Incident resolved";
-    case "INCIDENT_ESCALATED":
-      return "Incident escalated";
-    case "HIGH_ERROR_RATE":
-      return "High error rate detected";
-    case "HIGH_LATENCY":
-      return "High latency detected";
-    case "POD_RESTARTS":
-      return "Pod restarts detected";
-    case "REPLICA_UNAVAILABLE":
-      return "Replica availability degraded";
-    default:
-      if (source === "service_health_snapshots") {
-        return "Health snapshot recorded";
-      }
-
-      if (source === "incident_events") {
-        return formatLabel(item.event_type || item.title);
-      }
-
-      return item.title || formatLabel(item.event_type || item.source);
-  }
-}
-
-function timelineSubtitle(item: TimelineItem) {
-  const source = formatLabel(item.source);
-  const eventType = formatLabel(item.event_type);
-
-  return `${source} · ${eventType}`;
-}
-
 function timelineIcon(item: TimelineItem) {
-  const eventType = item.event_type?.toUpperCase();
+  const eventType = getTimelineEventType(item)?.toUpperCase();
   const source = item.source?.toLowerCase();
 
   if (eventType === "INCIDENT_RESOLVED") return "✅";
@@ -119,29 +149,17 @@ function timelineIcon(item: TimelineItem) {
   if (eventType === "HIGH_ERROR_RATE") return "📉";
   if (eventType === "HIGH_LATENCY") return "🐢";
   if (eventType === "POD_RESTARTS") return "🔁";
+  if (eventType === "POD_RESTART_SPIKE") return "🔁";
   if (eventType === "REPLICA_UNAVAILABLE") return "⚠️";
+  if (eventType === "SERVICE_DEGRADED") return "⚠️";
+  if (eventType === "HEALTH_SNAPSHOT_RECORDED") return "📈";
   if (source === "service_health_snapshots") return "📈";
 
   return "•";
 }
 
-function statusClass(status: string) {
-  switch (status) {
-    case "OPEN":
-      return "bg-red-100 text-red-700 border-red-200";
-    case "ACKNOWLEDGED":
-      return "bg-yellow-100 text-yellow-700 border-yellow-200";
-    case "RESOLVED":
-      return "bg-green-100 text-green-700 border-green-200";
-    case "FALSE_POSITIVE":
-      return "bg-zinc-100 text-zinc-700 border-zinc-200";
-    default:
-      return "bg-zinc-100 text-zinc-700 border-zinc-200";
-  }
-}
-
 function severityClass(severity: string) {
-  switch (severity) {
+  switch (severity?.toUpperCase()) {
     case "CRITICAL":
       return "bg-red-100 text-red-700 border-red-200";
     case "HIGH":
@@ -162,7 +180,8 @@ export default function IncidentDetailPage() {
   const [incident, setIncident] = useState<Incident | null>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshIncident() {
@@ -211,7 +230,7 @@ export default function IncidentDetailPage() {
     if (!incidentId) return;
 
     try {
-      setActionLoading(true);
+      setIsAcknowledging(true);
 
       await apiFetch(`/api/incidents/${incidentId}/acknowledge`, {
         method: "POST",
@@ -219,7 +238,7 @@ export default function IncidentDetailPage() {
 
       await refreshIncident();
     } finally {
-      setActionLoading(false);
+      setIsAcknowledging(false);
     }
   }
 
@@ -227,7 +246,7 @@ export default function IncidentDetailPage() {
     if (!incidentId) return;
 
     try {
-      setActionLoading(true);
+      setIsResolving(true);
 
       await apiFetch(`/api/incidents/${incidentId}/resolve`, {
         method: "POST",
@@ -235,7 +254,7 @@ export default function IncidentDetailPage() {
 
       await refreshIncident();
     } finally {
-      setActionLoading(false);
+      setIsResolving(false);
     }
   }
 
@@ -245,7 +264,7 @@ export default function IncidentDetailPage() {
 
   if (error) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 p-6">
         <Link
           href="/incidents"
           className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -262,7 +281,7 @@ export default function IncidentDetailPage() {
 
   if (!incident) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 p-6">
         <Link
           href="/incidents"
           className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -277,12 +296,15 @@ export default function IncidentDetailPage() {
     );
   }
 
-  const canAcknowledge = incident.status === "OPEN";
-  const canResolve =
-    incident.status === "OPEN" || incident.status === "ACKNOWLEDGED";
+  const normalizedStatus = incident.status?.toUpperCase();
+
+  const acknowledgeDisabled =
+    normalizedStatus === "ACKNOWLEDGED" || normalizedStatus === "RESOLVED";
+
+  const resolveDisabled = normalizedStatus === "RESOLVED";
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <Link
           href="/incidents"
@@ -309,7 +331,7 @@ export default function IncidentDetailPage() {
             </span>
 
             <span
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
+              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusBadgeClasses(
                 incident.status
               )}`}
             >
@@ -343,21 +365,37 @@ export default function IncidentDetailPage() {
           />
         </div>
 
-        <div className="mt-5 flex gap-3">
+        <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
-            disabled={!canAcknowledge || actionLoading}
+            type="button"
             onClick={acknowledgeIncident}
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700"
+            disabled={acknowledgeDisabled || isAcknowledging || isResolving}
+            className={`
+              rounded-lg px-4 py-2 text-sm font-semibold transition
+              ${
+                acknowledgeDisabled || isResolving
+                  ? "cursor-not-allowed bg-slate-700 text-slate-400 opacity-60"
+                  : "bg-amber-500 text-slate-950 hover:bg-amber-400"
+              }
+            `}
           >
-            Acknowledge
+            {isAcknowledging ? "Acknowledging..." : "Acknowledge"}
           </button>
 
           <button
-            disabled={!canResolve || actionLoading}
+            type="button"
             onClick={resolveIncident}
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+            disabled={resolveDisabled || isResolving || isAcknowledging}
+            className={`
+              rounded-lg px-4 py-2 text-sm font-semibold transition
+              ${
+                resolveDisabled || isAcknowledging
+                  ? "cursor-not-allowed bg-slate-700 text-slate-400 opacity-60"
+                  : "bg-green-500 text-slate-950 hover:bg-green-400"
+              }
+            `}
           >
-            Resolve
+            {isResolving ? "Resolving..." : "Resolve"}
           </button>
         </div>
       </section>
@@ -371,43 +409,58 @@ export default function IncidentDetailPage() {
           </p>
         ) : (
           <div className="mt-4 space-y-3">
-            {timeline.map((item, index) => (
-              <div
-                key={`${item.timestamp}-${item.event_type}-${index}`}
-                className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="flex gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-sm dark:bg-zinc-900">
-                      {timelineIcon(item)}
+            {timeline.map((item, index) => {
+              const eventType = getTimelineEventType(item);
+              const eventTitle = humanizeEventType(eventType);
+              const eventTimestamp = getTimelineTimestamp(item);
+              const eventDetails = getTimelineDetails(item);
+
+              return (
+                <div
+                  key={
+                    item.id ??
+                    item.event_id ??
+                    `${eventTimestamp ?? "unknown"}-${
+                      eventType ?? "incident-event"
+                    }-${index}`
+                  }
+                  className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="flex gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-sm dark:bg-zinc-900">
+                        {timelineIcon(item)}
+                      </div>
+
+                      <div>
+                        <p className="font-medium">{eventTitle}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Incident event
+                        </p>
+                      </div>
                     </div>
 
-                    <div>
-                      <p className="font-medium">{timelineTitle(item)}</p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {timelineSubtitle(item)}
-                      </p>
-                    </div>
+                    <time className="text-xs text-zinc-500">
+                      {eventTimestamp
+                        ? new Date(eventTimestamp).toLocaleString()
+                        : "Timestamp unavailable"}
+                    </time>
                   </div>
 
-                  <p className="text-xs text-zinc-500">
-                    {new Date(item.timestamp).toLocaleString()}
-                  </p>
+                  {eventDetails && Object.keys(eventDetails).length > 0 && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+                        View metadata
+                      </summary>
+
+                      <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
+                        {JSON.stringify(eventDetails, null, 2)}
+                      </pre>
+                    </details>
+                  )}
                 </div>
-
-                {item.details && Object.keys(item.details).length > 0 && (
-                  <details className="mt-3">
-                    <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-                      View metadata
-                    </summary>
-
-                    <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
-                      {JSON.stringify(item.details, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
