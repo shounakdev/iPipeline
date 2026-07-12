@@ -103,7 +103,7 @@ export default function ServiceHealthPage() {
     }
 
     if (serviceId) {
-      loadServiceHealth();
+      void loadServiceHealth();
     }
   }, [serviceId]);
 
@@ -113,8 +113,9 @@ export default function ServiceHealthPage() {
 
   if (!health) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 p-6">
         <h1 className="text-2xl font-semibold">Service Health</h1>
+
         <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500">
           No health snapshot found for this service.
         </div>
@@ -123,7 +124,7 @@ export default function ServiceHealthPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <Link
           href="/observability"
@@ -132,21 +133,31 @@ export default function ServiceHealthPage() {
           ← Back to Observability
         </Link>
 
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">{health.service_name}</h1>
+
             <p className="text-sm text-zinc-500">
               {health.environment} · {health.service_id}
             </p>
           </div>
 
-          <span
-            className={`w-fit rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
-              health.status
-            )}`}
-          >
-            {health.status}
-          </span>
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+            <span
+              className={`w-fit rounded-full border px-3 py-1 text-xs font-medium ${statusClass(
+                health.status,
+              )}`}
+            >
+              {health.status}
+            </span>
+
+            <Link
+              href={`/services/${health.service_id}/reliability`}
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              View Reliability
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -203,6 +214,7 @@ export default function ServiceHealthPage() {
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <h3 className="font-medium">{incident.title}</h3>
+
                     <p className="mt-1 text-xs text-zinc-500">
                       Started {new Date(incident.started_at).toLocaleString()}
                     </p>
@@ -211,7 +223,7 @@ export default function ServiceHealthPage() {
                   <div className="flex gap-2">
                     <span
                       className={`rounded-full border px-2.5 py-1 text-xs font-medium ${severityClass(
-                        incident.severity
+                        incident.severity,
                       )}`}
                     >
                       {incident.severity}
@@ -219,7 +231,7 @@ export default function ServiceHealthPage() {
 
                     <span
                       className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass(
-                        incident.status
+                        incident.status,
                       )}`}
                     >
                       {incident.status}
@@ -249,6 +261,7 @@ export default function ServiceHealthPage() {
                 <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                   <div>
                     <p className="font-medium">{item.title}</p>
+
                     <p className="mt-1 text-xs text-zinc-500">
                       {item.source} · {item.event_type}
                     </p>

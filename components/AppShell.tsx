@@ -18,11 +18,16 @@ const navItems = [
   { label: "Event Explorer", href: "/events" },
   { label: "Observability", href: "/observability" },
   { label: "Incidents", href: "/incidents" },
+  { label: "Reliability", href: "/reliability" },
   { label: "Audit Logs", href: "/audit-logs" },
   { label: "Settings", href: "/settings" },
 ];
 
-export default function AppShell({ children }: { children: ReactNode }) {
+export default function AppShell({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -41,7 +46,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
       setUser(getCurrentUser());
     }
 
-    window.addEventListener("platform-auth-change", handleAuthChange);
+    window.addEventListener(
+      "platform-auth-change",
+      handleAuthChange,
+    );
     window.addEventListener("storage", handleAuthChange);
 
     return () => {
@@ -49,10 +57,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       window.removeEventListener(
         "platform-auth-change",
-        handleAuthChange
+        handleAuthChange,
       );
 
-      window.removeEventListener("storage", handleAuthChange);
+      window.removeEventListener(
+        "storage",
+        handleAuthChange,
+      );
     };
   }, []);
 
@@ -60,7 +71,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
     logout();
     setUser(null);
 
-    window.dispatchEvent(new Event("platform-auth-change"));
+    window.dispatchEvent(
+      new Event("platform-auth-change"),
+    );
 
     router.push("/login");
     router.refresh();
