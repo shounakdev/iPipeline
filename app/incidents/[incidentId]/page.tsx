@@ -1,478 +1,268 @@
-
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { apiFetch } from "@/lib/api";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
-type IncidentStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
-
-type Incident = {
-  id: string;
-  title: string;
-  description?: string | null;
-  severity: string;
-  status: IncidentStatus | string;
-  service_id: string;
-  environment: string;
-  correlation_id?: string | null;
-  triggered_by_event_id?: string | null;
-  started_at: string;
-  resolved_at?: string | null;
-};
-
-type TimelinePayload = Record<string, unknown> & {
-  event_type?: string | null;
-};
-
-type TimelineItem = {
-  id?: string | null;
-  event_id?: string | null;
-  timestamp?: string | null;
-  created_at?: string | null;
-  source?: string | null;
-  event_type?: string | null;
-  eventType?: string | null;
-  type?: string | null;
-  action?: string | null;
-  title?: string | null;
-  details?: Record<string, unknown> | null;
-  metadata?: TimelinePayload | null;
-  payload?: TimelinePayload | null;
-};
-
-const INCIDENT_EVENT_LABELS: Record<string, string> = {
-  HEALTH_SNAPSHOT_RECORDED: "Health snapshot recorded",
-  HIGH_ERROR_RATE: "High error rate detected",
-  HIGH_LATENCY: "High latency detected",
-  POD_RESTART_SPIKE: "Pod restart spike detected",
-  POD_RESTARTS: "Pod restarts detected",
-  REPLICA_UNAVAILABLE: "Replica availability degraded",
-  SERVICE_DEGRADED: "Service degraded",
-  INCIDENT_CREATED: "Incident created",
-  INCIDENT_ACKNOWLEDGED: "Incident acknowledged",
-  INCIDENT_RESOLVED: "Incident resolved",
-  INCIDENT_ESCALATED: "Incident escalated",
-};
-
-const getStatusBadgeClasses = (status?: string | null) => {
-  switch (status?.toUpperCase()) {
-    case "OPEN":
-      return "border-red-500/30 bg-red-500/10 text-red-400";
-
-    case "ACKNOWLEDGED":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
-
-    case "RESOLVED":
-      return "border-green-500/30 bg-green-500/10 text-green-400";
-
-    default:
-      return "border-slate-500/30 bg-slate-500/10 text-slate-400";
-  }
-};
-
-const humanizeEventType = (eventType?: string | null) => {
-  if (!eventType) {
-    return "Incident event";
-  }
-
-  const normalizedType = eventType.toUpperCase();
-
-  if (INCIDENT_EVENT_LABELS[normalizedType]) {
-    return INCIDENT_EVENT_LABELS[normalizedType];
-  }
-
-  const readableText = normalizedType.toLowerCase().replaceAll("_", " ");
-
-  return readableText.charAt(0).toUpperCase() + readableText.slice(1);
-};
-
-const getTimelineEventType = (event: TimelineItem) => {
-  return (
-    event.event_type ??
-    event.eventType ??
-    event.type ??
-    event.action ??
-    event.metadata?.event_type ??
-    event.payload?.event_type ??
-    null
-  );
-};
-
-const getTimelineTimestamp = (event: TimelineItem) => {
-  return event.timestamp ?? event.created_at ?? null;
-};
-
-const getTimelineDetails = (event: TimelineItem) => {
-  return event.details ?? event.payload ?? event.metadata ?? null;
-};
-
-function normalizeArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) {
-    return value as T[];
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-
-    if (Array.isArray(record.timeline)) return record.timeline as T[];
-    if (Array.isArray(record.events)) return record.events as T[];
-    if (Array.isArray(record.items)) return record.items as T[];
-    if (Array.isArray(record.data)) return record.data as T[];
-    if (Array.isArray(record.results)) return record.results as T[];
-  }
-
-  return [];
-}
-
-async function fetchIncidentData(incidentId: string) {
-  const [rawIncidentData, rawTimelineData] = await Promise.all([
-    apiFetch(`/api/incidents/${incidentId}`),
-    apiFetch(`/api/incidents/${incidentId}/timeline`),
-  ]);
-
-  return {
-    incident: rawIncidentData as Incident,
-    timeline: normalizeArray<TimelineItem>(rawTimelineData),
-  };
-}
-
-function timelineIcon(item: TimelineItem) {
-  const eventType = getTimelineEventType(item)?.toUpperCase();
-  const source = item.source?.toLowerCase();
-
-  if (eventType === "INCIDENT_RESOLVED") return "✅";
-  if (eventType === "INCIDENT_ACKNOWLEDGED") return "👀";
-  if (eventType === "INCIDENT_CREATED") return "🚨";
-  if (eventType === "INCIDENT_ESCALATED") return "🔥";
-  if (eventType === "HIGH_ERROR_RATE") return "📉";
-  if (eventType === "HIGH_LATENCY") return "🐢";
-  if (eventType === "POD_RESTARTS") return "🔁";
-  if (eventType === "POD_RESTART_SPIKE") return "🔁";
-  if (eventType === "REPLICA_UNAVAILABLE") return "⚠️";
-  if (eventType === "SERVICE_DEGRADED") return "⚠️";
-  if (eventType === "HEALTH_SNAPSHOT_RECORDED") return "📈";
-  if (source === "service_health_snapshots") return "📈";
-
-  return "•";
-}
-
-function severityClass(severity: string) {
-  switch (severity?.toUpperCase()) {
-    case "CRITICAL":
-      return "bg-red-100 text-red-700 border-red-200";
-    case "HIGH":
-      return "bg-orange-100 text-orange-700 border-orange-200";
-    case "MEDIUM":
-      return "bg-yellow-100 text-yellow-700 border-yellow-200";
-    case "LOW":
-      return "bg-blue-100 text-blue-700 border-blue-200";
-    default:
-      return "bg-zinc-100 text-zinc-700 border-zinc-200";
-  }
-}
+import { IncidentActions } from "@/components/incidents/IncidentActions";
+import { IncidentAssignmentPanel } from "@/components/incidents/IncidentAssignmentPanel";
+import { IncidentComments } from "@/components/incidents/IncidentComments";
+import { IncidentHeader } from "@/components/incidents/IncidentHeader";
+import { IncidentImpactSummary } from "@/components/incidents/IncidentImpactSummary";
+import { IncidentMetricsCard } from "@/components/incidents/IncidentMetricsCard";
+import { IncidentTimeline } from "@/components/incidents/IncidentTimeline";
+import { RcaSection } from "@/components/incidents/RcaSection";
+import { RemediationSection } from "@/components/incidents/RemediationSection";
+import { SuspectedDeploymentCard } from "@/components/incidents/SuspectedDeploymentCard";
+import {
+  canManageIncidents,
+  getAuthServerSnapshot,
+  getAuthSnapshot,
+  parseCurrentUser,
+  subscribeToAuth,
+} from "@/lib/auth";
+import { getIncidentPageData } from "@/lib/incidents-api";
+import type {
+  IncidentDetail,
+  IncidentMetricsResponse,
+  IncidentTimelineResponse,
+} from "@/types/incidents";
 
 export default function IncidentDetailPage() {
-  const params = useParams<{ incidentId: string }>();
-  const incidentId = params.incidentId;
+  const params = useParams<{
+    incidentId: string;
+  }>();
 
-  const [incident, setIncident] = useState<Incident | null>(null);
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const incidentId =
+    typeof params.incidentId === "string"
+      ? params.incidentId
+      : "";
+
+  const rawCurrentUser = useSyncExternalStore(
+    subscribeToAuth,
+    getAuthSnapshot,
+    getAuthServerSnapshot,
+  );
+
+  const currentUser =
+    parseCurrentUser(rawCurrentUser);
+
+  const canEdit = canManageIncidents(
+    currentUser?.role,
+  );
+
+  const [incidentDetail, setIncidentDetail] =
+    useState<IncidentDetail | null>(null);
+
+  const [timeline, setTimeline] =
+    useState<IncidentTimelineResponse | null>(
+      null,
+    );
+
+  const [metrics, setMetrics] =
+    useState<IncidentMetricsResponse | null>(
+      null,
+    );
+
   const [loading, setLoading] = useState(true);
-  const [isAcknowledging, setIsAcknowledging] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function refreshIncident() {
-    if (!incidentId) return;
+  const [error, setError] =
+    useState<string | null>(null);
 
-    const data = await fetchIncidentData(incidentId);
+  const loadIncident = useCallback(async () => {
+    if (!incidentId) {
+      setError("Incident ID is missing.");
+      setLoading(false);
+      return;
+    }
 
-    setIncident(data.incident);
-    setTimeline(data.timeline);
+    setLoading(true);
     setError(null);
-  }
 
-  useEffect(() => {
-    if (!incidentId) return;
+    try {
+      const data =
+        await getIncidentPageData(incidentId);
 
-    let cancelled = false;
-
-    fetchIncidentData(incidentId)
-      .then((data) => {
-        if (cancelled) return;
-
-        setIncident(data.incident);
-        setTimeline(data.timeline);
-        setError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-
-        console.error(err);
-        setError(
-          "Failed to load incident. Check that the backend is running and the incident routes are registered."
-        );
-      })
-      .finally(() => {
-        if (cancelled) return;
-
-        setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+      setIncidentDetail(data.incident);
+      setTimeline(data.timeline);
+      setMetrics(data.metrics);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load incident.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, [incidentId]);
 
-  async function acknowledgeIncident() {
-    if (!incidentId) return;
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadIncident();
+    }, 0);
 
-    try {
-      setIsAcknowledging(true);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [loadIncident]);
 
-      await apiFetch(`/api/incidents/${incidentId}/acknowledge`, {
-        method: "POST",
-      });
-
-      await refreshIncident();
-    } finally {
-      setIsAcknowledging(false);
-    }
-  }
-
-  async function resolveIncident() {
-    if (!incidentId) return;
-
-    try {
-      setIsResolving(true);
-
-      await apiFetch(`/api/incidents/${incidentId}/resolve`, {
-        method: "POST",
-      });
-
-      await refreshIncident();
-    } finally {
-      setIsResolving(false);
-    }
-  }
-
-  if (loading) {
-    return <div className="p-6">Loading incident...</div>;
-  }
-
-  if (error) {
+  if (loading && !incidentDetail) {
     return (
-      <div className="space-y-4 p-6">
-        <Link
-          href="/incidents"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-        >
-          ← Back to Incidents
-        </Link>
+      <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <Link
+            href="/incidents"
+            className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-400"
+          >
+            ← Back to Incidents
+          </Link>
 
-        <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-          {error}
+          <div className="mt-6 rounded-xl border border-slate-300 bg-white px-6 py-20 text-center text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+            Loading incident…
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
-  if (!incident) {
+  if (
+    error ||
+    !incidentDetail ||
+    !timeline ||
+    !metrics
+  ) {
     return (
-      <div className="space-y-4 p-6">
-        <Link
-          href="/incidents"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-        >
-          ← Back to Incidents
-        </Link>
+      <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <Link
+            href="/incidents"
+            className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-400"
+          >
+            ← Back to Incidents
+          </Link>
 
-        <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500">
-          Incident not found.
+          <div className="mt-6 rounded-xl border border-red-300 bg-red-50 p-8 text-center shadow-sm dark:border-red-900 dark:bg-red-950/30">
+            <h1 className="text-lg font-semibold text-red-700 dark:text-red-400">
+              Could not load incident
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+              {error ??
+                "The incident response was incomplete."}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                void loadIncident();
+              }}
+              disabled={loading}
+              className="mt-5 rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+            >
+              {loading ? "Loading…" : "Try again"}
+            </button>
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
-
-  const normalizedStatus = incident.status?.toUpperCase();
-
-  const acknowledgeDisabled =
-    normalizedStatus === "ACKNOWLEDGED" || normalizedStatus === "RESOLVED";
-
-  const resolveDisabled = normalizedStatus === "RESOLVED";
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <Link
-          href="/incidents"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-        >
-          ← Back to Incidents
-        </Link>
+    <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-950 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/incidents"
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+          >
+            ← Back to Incidents
+          </Link>
 
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">{incident.title}</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              {incident.environment} · {incident.service_id}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <span
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${severityClass(
-                incident.severity
-              )}`}
-            >
-              {incident.severity}
-            </span>
-
-            <span
-              className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusBadgeClasses(
-                incident.status
-              )}`}
-            >
-              {incident.status}
-            </span>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void loadIncident();
+            }}
+            disabled={loading}
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
-      </div>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-lg font-semibold">Incident Summary</h2>
+        <IncidentHeader
+          incidentDetail={incidentDetail}
+          actions={
+            <IncidentActions
+              incidentId={incidentId}
+              status={
+                incidentDetail.incident.status
+              }
+              canEdit={canEdit}
+              onChanged={loadIncident}
+            />
+          }
+        />
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Info label="Description" value={incident.description || "N/A"} />
-          <Info label="Correlation ID" value={incident.correlation_id || "N/A"} />
-          <Info
-            label="Triggered By Event"
-            value={incident.triggered_by_event_id || "N/A"}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <IncidentImpactSummary
+            incidentDetail={incidentDetail}
+            metrics={metrics}
           />
-          <Info
-            label="Started At"
-            value={new Date(incident.started_at).toLocaleString()}
-          />
-          <Info
-            label="Resolved At"
-            value={
-              incident.resolved_at
-                ? new Date(incident.resolved_at).toLocaleString()
-                : "N/A"
+
+          <SuspectedDeploymentCard
+            deployment={
+              incidentDetail.suspected_deployment
+            }
+            deploymentId={
+              incidentDetail.incident
+                .suspected_deployment_id
             }
           />
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={acknowledgeIncident}
-            disabled={acknowledgeDisabled || isAcknowledging || isResolving}
-            className={`
-              rounded-lg px-4 py-2 text-sm font-semibold transition
-              ${
-                acknowledgeDisabled || isResolving
-                  ? "cursor-not-allowed bg-slate-700 text-slate-400 opacity-60"
-                  : "bg-amber-500 text-slate-950 hover:bg-amber-400"
-              }
-            `}
-          >
-            {isAcknowledging ? "Acknowledging..." : "Acknowledge"}
-          </button>
+        <IncidentAssignmentPanel
+          incidentId={incidentId}
+          status={incidentDetail.incident.status}
+          currentAssignment={
+            incidentDetail.current_assignment
+          }
+          canEdit={canEdit}
+          onChanged={loadIncident}
+        />
 
-          <button
-            type="button"
-            onClick={resolveIncident}
-            disabled={resolveDisabled || isResolving || isAcknowledging}
-            className={`
-              rounded-lg px-4 py-2 text-sm font-semibold transition
-              ${
-                resolveDisabled || isAcknowledging
-                  ? "cursor-not-allowed bg-slate-700 text-slate-400 opacity-60"
-                  : "bg-green-500 text-slate-950 hover:bg-green-400"
-              }
-            `}
-          >
-            {isResolving ? "Resolving..." : "Resolve"}
-          </button>
+        <IncidentMetricsCard metrics={metrics} />
+
+        <IncidentTimeline timeline={timeline} />
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <RcaSection
+            summary={incidentDetail.rca_summary}
+          />
+
+          <RemediationSection
+            summary={
+              incidentDetail.remediation_summary
+            }
+            resolutionSummary={
+              incidentDetail.resolution_summary
+            }
+          />
         </div>
-      </section>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-lg font-semibold">Incident Timeline</h2>
-
-        {timeline.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500">
-            No timeline events found for this incident.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {timeline.map((item, index) => {
-              const eventType = getTimelineEventType(item);
-              const eventTitle = humanizeEventType(eventType);
-              const eventTimestamp = getTimelineTimestamp(item);
-              const eventDetails = getTimelineDetails(item);
-
-              return (
-                <div
-                  key={
-                    item.id ??
-                    item.event_id ??
-                    `${eventTimestamp ?? "unknown"}-${
-                      eventType ?? "incident-event"
-                    }-${index}`
-                  }
-                  className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
-                >
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="flex gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-sm dark:bg-zinc-900">
-                        {timelineIcon(item)}
-                      </div>
-
-                      <div>
-                        <p className="font-medium">{eventTitle}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          Incident event
-                        </p>
-                      </div>
-                    </div>
-
-                    <time className="text-xs text-zinc-500">
-                      {eventTimestamp
-                        ? new Date(eventTimestamp).toLocaleString()
-                        : "Timestamp unavailable"}
-                    </time>
-                  </div>
-
-                  {eventDetails && Object.keys(eventDetails).length > 0 && (
-                    <details className="mt-3">
-                      <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-                        View metadata
-                      </summary>
-
-                      <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
-                        {JSON.stringify(eventDetails, null, 2)}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 text-sm">{value}</p>
-    </div>
+        <IncidentComments
+          incidentId={incidentId}
+          comments={incidentDetail.comments}
+          canEdit={canEdit}
+          onChanged={loadIncident}
+        />
+      </div>
+    </main>
   );
 }

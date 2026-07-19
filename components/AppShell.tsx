@@ -6,21 +6,57 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { ThemeToggle } from "@/components/theme-toggle";
-import { getCurrentUser, logout } from "@/lib/auth";
-import type { AuthUser } from "@/lib/auth";
+import {
+  getCurrentUser,
+  logout,
+  type AuthUser,
+} from "@/lib/auth";
 
 const navItems = [
-  { label: "Dashboard", href: "/" },
-  { label: "Projects", href: "/projects" },
-  { label: "Services", href: "/services" },
-  { label: "PipelineIQ", href: "/pipelineiq" },
-  { label: "Deployments", href: "/deployments" },
-  { label: "Event Explorer", href: "/events" },
-  { label: "Observability", href: "/observability" },
-  { label: "Incidents", href: "/incidents" },
-  { label: "Reliability", href: "/reliability" },
-  { label: "Audit Logs", href: "/audit-logs" },
-  { label: "Settings", href: "/settings" },
+  {
+    label: "Dashboard",
+    href: "/",
+  },
+  {
+    label: "Projects",
+    href: "/projects",
+  },
+  {
+    label: "Services",
+    href: "/services",
+  },
+  {
+    label: "PipelineIQ",
+    href: "/pipelineiq",
+  },
+  {
+    label: "Deployments",
+    href: "/deployments",
+  },
+  {
+    label: "Event Explorer",
+    href: "/events",
+  },
+  {
+    label: "Observability",
+    href: "/observability",
+  },
+  {
+    label: "Incidents",
+    href: "/incidents",
+  },
+  {
+    label: "Reliability",
+    href: "/reliability",
+  },
+  {
+    label: "Audit Logs",
+    href: "/audit-logs",
+  },
+  {
+    label: "Settings",
+    href: "/settings",
+  },
 ];
 
 export default function AppShell({
@@ -31,7 +67,8 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
 
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] =
+    useState<AuthUser | null>(null);
 
   useEffect(() => {
     /*
@@ -50,7 +87,11 @@ export default function AppShell({
       "platform-auth-change",
       handleAuthChange,
     );
-    window.addEventListener("storage", handleAuthChange);
+
+    window.addEventListener(
+      "storage",
+      handleAuthChange,
+    );
 
     return () => {
       window.clearTimeout(timer);
@@ -83,8 +124,10 @@ export default function AppShell({
     <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-50">
       <div className="flex min-h-screen">
         <aside className="flex min-h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-6 transition-colors duration-200 dark:border-slate-800 dark:bg-slate-900">
-          {/* Logo */}
-          <Link href="/" className="block">
+          <Link
+            href="/"
+            className="block"
+          >
             <div className="text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-50">
               PlatformIQ
             </div>
@@ -94,7 +137,6 @@ export default function AppShell({
             </p>
           </Link>
 
-          {/* User information */}
           <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm transition-colors dark:border-slate-700 dark:bg-slate-800/60">
             {user ? (
               <>
@@ -124,13 +166,14 @@ export default function AppShell({
             )}
           </div>
 
-          {/* Navigation */}
           <nav className="mt-8 flex-1 space-y-2">
             {navItems.map((item) => {
               const active =
                 item.href === "/"
                   ? pathname === "/"
-                  : pathname.startsWith(item.href);
+                  : pathname.startsWith(
+                      item.href,
+                    );
 
               return (
                 <Link
@@ -148,7 +191,6 @@ export default function AppShell({
             })}
           </nav>
 
-          {/* Sidebar footer */}
           <div className="mt-6 border-t border-slate-200 pt-4 dark:border-slate-800">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Appearance
@@ -158,7 +200,6 @@ export default function AppShell({
           </div>
         </aside>
 
-        {/* Page content */}
         <main className="min-w-0 flex-1 bg-slate-50 p-8 transition-colors duration-200 dark:bg-slate-950">
           {children}
         </main>
