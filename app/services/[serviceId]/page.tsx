@@ -29,12 +29,27 @@ type Incident = {
   resolved_at?: string | null;
 };
 
+type IncidentListResponse = {
+  incidents?: Incident[];
+  items?: Incident[];
+  results?: Incident[];
+  data?: Incident[];
+};
+
 type TimelineItem = {
   timestamp: string;
   source: string;
   event_type: string;
   title: string;
   details: Record<string, unknown>;
+};
+
+type TimelineResponse = {
+  timeline?: TimelineItem[];
+  events?: TimelineItem[];
+  items?: TimelineItem[];
+  results?: TimelineItem[];
+  data?: TimelineItem[];
 };
 
 function statusClass(status: string) {
@@ -71,6 +86,66 @@ function severityClass(severity: string) {
   }
 }
 
+function asIncidentArray(data: unknown): Incident[] {
+  if (Array.isArray(data)) {
+    return data as Incident[];
+  }
+
+  if (data && typeof data === "object") {
+    const response = data as IncidentListResponse;
+
+    if (Array.isArray(response.incidents)) {
+      return response.incidents;
+    }
+
+    if (Array.isArray(response.items)) {
+      return response.items;
+    }
+
+    if (Array.isArray(response.results)) {
+      return response.results;
+    }
+
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+  }
+
+  return [];
+}
+
+function asTimelineArray(data: unknown): TimelineItem[] {
+  if (Array.isArray(data)) {
+    return data as TimelineItem[];
+  }
+
+  if (data && typeof data === "object") {
+    const response = data as TimelineResponse;
+
+    if (Array.isArray(response.timeline)) {
+      return response.timeline;
+    }
+
+    if (Array.isArray(response.events)) {
+      return response.events;
+    }
+
+    if (Array.isArray(response.items)) {
+      return response.items;
+    }
+
+    if (Array.isArray(response.results)) {
+      return response.results;
+    }
+
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+  }
+
+  return [];
+}
+
 export default function ServiceHealthPage() {
   const params = useParams<{ serviceId: string }>();
   const serviceId = params.serviceId;
@@ -90,13 +165,9 @@ export default function ServiceHealthPage() {
             apiFetch(`/api/services/${serviceId}/runtime-timeline`),
           ]);
 
-        const healthData = rawHealthData as HealthSummary;
-        const incidentsData = rawIncidentsData as Incident[];
-        const timelineData = rawTimelineData as TimelineItem[];
-
-        setHealth(healthData);
-        setIncidents(incidentsData);
-        setTimeline(timelineData);
+        setHealth(rawHealthData as HealthSummary);
+        setIncidents(asIncidentArray(rawIncidentsData));
+        setTimeline(asTimelineArray(rawTimelineData));
       } finally {
         setLoading(false);
       }

@@ -8,15 +8,14 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-
 import { IncidentActions } from "@/components/incidents/IncidentActions";
 import { IncidentAssignmentPanel } from "@/components/incidents/IncidentAssignmentPanel";
 import { IncidentComments } from "@/components/incidents/IncidentComments";
 import { IncidentHeader } from "@/components/incidents/IncidentHeader";
 import { IncidentImpactSummary } from "@/components/incidents/IncidentImpactSummary";
 import { IncidentMetricsCard } from "@/components/incidents/IncidentMetricsCard";
+import { IncidentRCASection } from "@/components/incidents/IncidentRCASection";
 import { IncidentTimeline } from "@/components/incidents/IncidentTimeline";
-import { RcaSection } from "@/components/incidents/RcaSection";
 import { RemediationSection } from "@/components/incidents/RemediationSection";
 import { SuspectedDeploymentCard } from "@/components/incidents/SuspectedDeploymentCard";
 import {
@@ -49,8 +48,7 @@ export default function IncidentDetailPage() {
     getAuthServerSnapshot,
   );
 
-  const currentUser =
-    parseCurrentUser(rawCurrentUser);
+  const currentUser = parseCurrentUser(rawCurrentUser);
 
   const canEdit = canManageIncidents(
     currentUser?.role,
@@ -241,20 +239,16 @@ export default function IncidentDetailPage() {
 
         <IncidentTimeline timeline={timeline} />
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <RcaSection
-            summary={incidentDetail.rca_summary}
-          />
+        <IncidentRCASection incidentId={incidentId} />
 
-          <RemediationSection
-            summary={
-              incidentDetail.remediation_summary
-            }
-            resolutionSummary={
-              incidentDetail.resolution_summary
-            }
-          />
-        </div>
+        <RemediationSection
+          summary={
+            incidentDetail.remediation_summary
+          }
+          resolutionSummary={
+            incidentDetail.resolution_summary
+          }
+        />
 
         <IncidentComments
           incidentId={incidentId}
