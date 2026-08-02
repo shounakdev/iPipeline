@@ -84,9 +84,38 @@ const evidenceSections = [
   "traces",
   "kubernetes",
 ];
+function formatLabel(value: unknown): string {
+  let normalizedValue: string;
 
-function formatLabel(value: string) {
-  return value
+  if (typeof value === "string") {
+    normalizedValue = value;
+  } else if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    normalizedValue = String(value);
+  } else if (isRecord(value)) {
+    const preferredValue =
+      value.source ??
+      value.name ??
+      value.collector ??
+      value.status ??
+      value.reason;
+
+    normalizedValue =
+      typeof preferredValue === "string"
+        ? preferredValue
+        : JSON.stringify(value);
+  } else if (
+    value === null ||
+    value === undefined
+  ) {
+    normalizedValue = "unknown";
+  } else {
+    normalizedValue = String(value);
+  }
+
+  return normalizedValue
     .replace(/_/g, " ")
     .replace(/\b\w/g, (character) =>
       character.toUpperCase(),
@@ -713,14 +742,20 @@ export function IncidentRCASection({
 
             <ul className="mt-2 list-disc pl-5">
               {evidence.missing_sources.map(
-                (source) => (
-                  <li key={source}>
-                    {formatLabel(source)} data was
-                    unavailable for this incident
-                    window.
-                  </li>
-                ),
-              )}
+                  (source, index) => {
+                    const sourceLabel =
+                      formatLabel(source);
+
+                    return (
+                      <li
+                        key={`${sourceLabel}-${index}`}
+                      >
+                        {sourceLabel} data was unavailable
+                        for this incident window.
+                      </li>
+                    );
+                  },
+                )}
             </ul>
 
             <p className="mt-2">

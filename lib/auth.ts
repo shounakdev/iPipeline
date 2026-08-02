@@ -202,3 +202,16 @@ export function canManageIncidents(
     "operator",
   ].includes(role.toLowerCase());
 }
+
+export function canManageRemediations(
+  role?: string | null,
+): boolean {
+  if (!role) {
+    return false;
+  }
+
+  return [
+    "admin",
+    "operator",
+  ].includes(role.toLowerCase());
+}

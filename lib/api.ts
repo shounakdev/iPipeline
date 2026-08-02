@@ -1,7 +1,10 @@
 import { getAccessToken } from "./auth";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 
 export class ApiError extends Error {
   status: number;
@@ -30,7 +33,9 @@ export async function apiFetch<T = unknown>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const url = path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+  const url = path.startsWith("http")
+    ? path
+    : `${API_BASE_URL}${path}`;
 
   const response = await fetch(url, {
     ...options,
@@ -47,14 +52,33 @@ export async function apiFetch<T = unknown>(
 
   if (!response.ok) {
     const errorData = data as {
-      detail?: string;
+      detail?:
+        | string
+        | {
+            code?: string;
+            message?: string;
+          };
       message?: string;
     } | null;
 
-    const message =
-      errorData?.detail ||
-      errorData?.message ||
+    const detail = errorData?.detail;
+
+    let message =
       `Request failed with status ${response.status}`;
+
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (
+      detail &&
+      typeof detail === "object" &&
+      typeof detail.message === "string"
+    ) {
+      message = detail.message;
+    } else if (
+      typeof errorData?.message === "string"
+    ) {
+      message = errorData.message;
+    }
 
     throw new ApiError(response.status, message, data);
   }

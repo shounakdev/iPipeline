@@ -20,6 +20,7 @@ import { RemediationSection } from "@/components/incidents/RemediationSection";
 import { SuspectedDeploymentCard } from "@/components/incidents/SuspectedDeploymentCard";
 import {
   canManageIncidents,
+  canManageRemediations,
   getAuthServerSnapshot,
   getAuthSnapshot,
   parseCurrentUser,
@@ -48,11 +49,18 @@ export default function IncidentDetailPage() {
     getAuthServerSnapshot,
   );
 
-  const currentUser = parseCurrentUser(rawCurrentUser);
+  const currentUser = parseCurrentUser(
+    rawCurrentUser,
+  );
 
   const canEdit = canManageIncidents(
     currentUser?.role,
   );
+
+  const canManageRemediation =
+    canManageRemediations(
+      currentUser?.role,
+    );
 
   const [incidentDetail, setIncidentDetail] =
     useState<IncidentDetail | null>(null);
@@ -239,15 +247,19 @@ export default function IncidentDetailPage() {
 
         <IncidentTimeline timeline={timeline} />
 
-        <IncidentRCASection incidentId={incidentId} />
+        <IncidentRCASection
+          incidentId={incidentId}
+        />
 
         <RemediationSection
+          incidentId={incidentId}
           summary={
             incidentDetail.remediation_summary
           }
           resolutionSummary={
             incidentDetail.resolution_summary
           }
+          canManage={canManageRemediation}
         />
 
         <IncidentComments

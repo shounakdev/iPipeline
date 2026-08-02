@@ -46,6 +46,10 @@ const navItems = [
     href: "/incidents",
   },
   {
+    label: "Remediation",
+    href: "/remediation",
+  },
+  {
     label: "Reliability",
     href: "/reliability",
   },
