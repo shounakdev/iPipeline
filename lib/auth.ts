@@ -215,3 +215,15 @@ export function canManageRemediations(
     "operator",
   ].includes(role.toLowerCase());
 }
+
+export function canManageExperiments(
+  role?: string | null,
+): boolean {
+  if (!role) {
+    return false;
+  }
+
+  return ["admin", "operator"].includes(
+    role.toLowerCase(),
+  );
+}

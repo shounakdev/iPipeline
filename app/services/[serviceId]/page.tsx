@@ -146,6 +146,12 @@ function asTimelineArray(data: unknown): TimelineItem[] {
   return [];
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : "Unable to load service health.";
+}
+
 export default function ServiceHealthPage() {
   const params = useParams<{ serviceId: string }>();
   const serviceId = params.serviceId;
@@ -154,28 +160,50 @@ export default function ServiceHealthPage() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadServiceHealth() {
-      try {
-        const [rawHealthData, rawIncidentsData, rawTimelineData] =
-          await Promise.all([
-            apiFetch(`/api/observability/services/${serviceId}/health`),
-            apiFetch(`/api/services/${serviceId}/incidents`),
-            apiFetch(`/api/services/${serviceId}/runtime-timeline`),
-          ]);
+      const [healthResult, incidentsResult, timelineResult] =
+        await Promise.allSettled([
+          apiFetch(`/api/observability/services/${serviceId}/health`),
+          apiFetch(`/api/services/${serviceId}/incidents`),
+          apiFetch(`/api/services/${serviceId}/runtime-timeline`),
+        ]);
 
-        setHealth(rawHealthData as HealthSummary);
-        setIncidents(asIncidentArray(rawIncidentsData));
-        setTimeline(asTimelineArray(rawTimelineData));
-      } finally {
-        setLoading(false);
+      if (cancelled) return;
+
+      if (healthResult.status === "fulfilled") {
+        setHealth(healthResult.value as HealthSummary);
+      } else {
+        setHealth(null);
+        setError(getErrorMessage(healthResult.reason));
       }
+
+      setIncidents(
+        incidentsResult.status === "fulfilled"
+          ? asIncidentArray(incidentsResult.value)
+          : [],
+      );
+
+      setTimeline(
+        timelineResult.status === "fulfilled"
+          ? asTimelineArray(timelineResult.value)
+          : [],
+      );
+
+      setLoading(false);
     }
 
-    if (serviceId) {
-      void loadServiceHealth();
-    }
+    if (!serviceId) return;
+
+    void loadServiceHealth();
+
+    return () => {
+      cancelled = true;
+    };
   }, [serviceId]);
 
   if (loading) {
@@ -185,10 +213,19 @@ export default function ServiceHealthPage() {
   if (!health) {
     return (
       <div className="space-y-4 p-6">
+        <Link
+          href="/services"
+          className="text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          ← Back to Services
+        </Link>
+
         <h1 className="text-2xl font-semibold">Service Health</h1>
 
-        <div className="rounded-xl border border-dashed border-zinc-300 p-6 text-sm text-zinc-500">
-          No health snapshot found for this service.
+        <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-6 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          {error?.includes("No health snapshot found")
+            ? "No health snapshot has been recorded for this service yet."
+            : error ?? "No health snapshot found for this service."}
         </div>
       </div>
     );

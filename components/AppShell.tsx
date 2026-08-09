@@ -3,7 +3,10 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -11,6 +14,9 @@ import {
   logout,
   type AuthUser,
 } from "@/lib/auth";
+
+const AUTH_CHANGE_EVENT =
+  "platformiq-auth-change";
 
 const navItems = [
   {
@@ -54,6 +60,10 @@ const navItems = [
     href: "/reliability",
   },
   {
+    label: "Experiments",
+    href: "/experiments",
+  },
+  {
     label: "Audit Logs",
     href: "/audit-logs",
   },
@@ -75,10 +85,6 @@ export default function AppShell({
     useState<AuthUser | null>(null);
 
   useEffect(() => {
-    /*
-     * Run the initial browser-only auth check asynchronously.
-     * This avoids calling setState directly in the effect body.
-     */
     const timer = window.setTimeout(() => {
       setUser(getCurrentUser());
     }, 0);
@@ -88,7 +94,7 @@ export default function AppShell({
     }
 
     window.addEventListener(
-      "platform-auth-change",
+      AUTH_CHANGE_EVENT,
       handleAuthChange,
     );
 
@@ -101,7 +107,7 @@ export default function AppShell({
       window.clearTimeout(timer);
 
       window.removeEventListener(
-        "platform-auth-change",
+        AUTH_CHANGE_EVENT,
         handleAuthChange,
       );
 
@@ -117,7 +123,7 @@ export default function AppShell({
     setUser(null);
 
     window.dispatchEvent(
-      new Event("platform-auth-change"),
+      new Event(AUTH_CHANGE_EVENT),
     );
 
     router.push("/login");
